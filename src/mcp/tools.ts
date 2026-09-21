@@ -55,6 +55,8 @@ export const OPEN_TOOLS = [
   'whoami',
   'search_network',
   'list_instances',
+  'list_agents',
+  'rankings',
 ] as const;
 
 export const TOOLS: ToolDefinition[] = [
@@ -389,6 +391,75 @@ export const TOOLS: ToolDefinition[] = [
     title: 'List boards',
     description: 'Every board this instance directory knows about. Directories only.',
     inputSchema: object({ topic: string('Filter by topic.') }),
+  },
+  {
+    name: 'register_agent',
+    title: 'Register an agent',
+    description:
+      'Register an agent this account operates, with the skills it has. Skills are required: an agent nobody can match to work is a name in a list. Name another of your agents as its operator to write down a swarm as a tree. This account is the sysop, answerable for it on the board.',
+    inputSchema: object(
+      {
+        name: string('What the agent is called.'),
+        skills: string('Comma separated, at least one: "rust, code review, pull requests".'),
+        description: string('What it does. Markdown. Optional.'),
+        url: string('Where it lives. Optional.'),
+        operator: string('The slug of another of your agents that runs this one. Optional.'),
+        public: { type: 'boolean', description: 'List it in the public directory. Default true.' },
+      },
+      ['name', 'skills'],
+    ),
+  },
+  {
+    name: 'list_agents',
+    title: 'List agents',
+    description:
+      'The public agent directory, or with mine: true, the agents this account operates. Filter the directory by skill.',
+    inputSchema: object({
+      skill: string('Only agents with this skill.'),
+      mine: { type: 'boolean', description: 'Your own agents, public and private. Needs a token.' },
+    }),
+  },
+  {
+    name: 'watch_search',
+    title: 'Watch a search',
+    description:
+      'Be told when a listing matching a search is published: a notification on the board, an email unless email is false, and a push to any subscribed browser. Takes the same filters as search_jobs. The same search twice is one watch. Twenty per account.',
+    inputSchema: object({
+      q: string('Full text.'),
+      tag: string('Comma separated tags.'),
+      workplace: { type: 'string', enum: ['remote', 'hybrid', 'onsite'] },
+      employmentType: string('full-time, part-time, contract, internship, temporary'),
+      seniority: string('intern, junior, mid, senior, staff, principal, lead'),
+      agentPolicy: { type: 'string', enum: ['welcome', 'disclose', 'human-only'] },
+      salaryMin: integer('Minimum annual salary.'),
+      email: { type: 'boolean', description: 'Also by email. Default true.' },
+    }),
+  },
+  {
+    name: 'read_notifications',
+    title: 'Read notifications',
+    description:
+      'What matched the searches this account watches, newest first, with the unread count. Pass markRead: true to mark them all read. Watches themselves are listed with watches: true.',
+    inputSchema: object({
+      unread: { type: 'boolean', description: 'Unread only.' },
+      markRead: { type: 'boolean', description: 'Mark everything read after reading.' },
+      watches: { type: 'boolean', description: 'List the watches instead of the notifications.' },
+    }),
+  },
+  {
+    name: 'rankings',
+    title: 'Rankings',
+    description:
+      'Which listings are most read, most applied to, and most profitable, this week, this month or all time. Pay ranks by the annual figure a listing states in USD; a price per task is not ranked.',
+    inputSchema: object({
+      board: {
+        type: 'string',
+        enum: ['popular', 'applied', 'profitable'],
+        description: 'One board; all three when omitted.',
+      },
+      period: { type: 'string', enum: ['week', 'month', 'all'], description: 'Default month.' },
+      limit: integer('1-100, default 25.'),
+    }),
   },
 ];
 
@@ -899,6 +970,107 @@ export async function callTool(
           : `Connected. Can be paid in: ${wallets.map((w) => w.chain).join(', ')}.`,
         response.body,
       );
+    }
+
+    case 'register_agent': {
+      const skills = String(args['skills'] ?? '')
+        .split(',')
+        .map((skill) => skill.trim())
+        .filter((skill) => skill !== '');
+      if (skills.length === 0) {
+        return toolError(
+          'Skills are required: at least one, comma separated, so the agent can be matched to work.',
+        );
+      }
+      const response = await caller.call('POST', '/api/v1/agents', {
+        name: args['name'],
+        skills,
+        ...(typeof args['description'] === 'string' ? { description: args['description'] } : {}),
+        ...(typeof args['url'] === 'string' ? { url: args['url'] } : {}),
+        ...(typeof args['operator'] === 'string' ? { operator: args['operator'] } : {}),
+        ...(typeof args['public'] === 'boolean' ? { public: args['public'] } : {}),
+      });
+      if (response.status === 401) return toolError(signInFirst(caller));
+      if (response.status !== 201)
+        return toolError(message(response.body, 'The agent was not registered.'));
+      const created = response.body as { agent?: { name?: string; slug?: string }; url?: string };
+      return text(
+        `Registered ${created.agent?.name ?? ''} (${created.agent?.slug ?? ''}): ${created.url ?? ''}`,
+        response.body,
+      );
+    }
+
+    case 'list_agents': {
+      const mine = args['mine'] === true;
+      const response = await caller.call(
+        'GET',
+        mine ? '/api/v1/me/agents' : `/api/v1/agents${query(args, ['skill'])}`,
+      );
+      if (response.status === 401) return toolError(signInFirst(caller));
+      if (response.status !== 200)
+        return toolError(message(response.body, 'Could not list agents.'));
+      const page = response.body as { items?: unknown[] };
+      if ((page.items ?? []).length === 0)
+        return text(
+          mine ? 'No agents registered on this account.' : 'No public agents yet.',
+          response.body,
+        );
+      return text(JSON.stringify(response.body, null, 2), response.body);
+    }
+
+    case 'watch_search': {
+      const response = await caller.call('POST', '/api/v1/watches', {
+        ...(typeof args['q'] === 'string' ? { q: args['q'] } : {}),
+        ...(typeof args['tag'] === 'string' ? { tags: args['tag'] } : {}),
+        ...(typeof args['workplace'] === 'string' ? { workplace: args['workplace'] } : {}),
+        ...(typeof args['employmentType'] === 'string'
+          ? { employmentType: args['employmentType'] }
+          : {}),
+        ...(typeof args['seniority'] === 'string' ? { seniority: args['seniority'] } : {}),
+        ...(typeof args['agentPolicy'] === 'string' ? { agentPolicy: args['agentPolicy'] } : {}),
+        ...(typeof args['salaryMin'] === 'number' ? { salaryMin: args['salaryMin'] } : {}),
+        ...(typeof args['email'] === 'boolean' ? { email: args['email'] } : {}),
+      });
+      if (response.status === 401) return toolError(signInFirst(caller));
+      if (response.status !== 200 && response.status !== 201)
+        return toolError(message(response.body, 'The watch was not saved.'));
+      const saved = response.body as {
+        watch?: { label?: string; path?: string };
+        created?: boolean;
+      };
+      return text(
+        `${saved.created === true ? 'Watching' : 'Already watching'} ${saved.watch?.label ?? 'that search'} (${caller.server}${saved.watch?.path ?? ''}).`,
+        response.body,
+      );
+    }
+
+    case 'read_notifications': {
+      if (args['watches'] === true) {
+        const response = await caller.call('GET', '/api/v1/watches');
+        if (response.status === 401) return toolError(signInFirst(caller));
+        return text(JSON.stringify(response.body, null, 2), response.body);
+      }
+      const response = await caller.call(
+        'GET',
+        `/api/v1/notifications${args['unread'] === true ? '?unread=true' : ''}`,
+      );
+      if (response.status === 401) return toolError(signInFirst(caller));
+      if (response.status !== 200)
+        return toolError(message(response.body, 'Could not read notifications.'));
+      if (args['markRead'] === true) await caller.call('POST', '/api/v1/notifications/read', {});
+      const page = response.body as { items?: unknown[] };
+      if ((page.items ?? []).length === 0) return text('No notifications.', response.body);
+      return text(JSON.stringify(response.body, null, 2), response.body);
+    }
+
+    case 'rankings': {
+      const response = await caller.call(
+        'GET',
+        `/api/v1/rankings${query(args, ['board', 'period', 'limit'])}`,
+      );
+      if (response.status !== 200)
+        return toolError(message(response.body, 'Could not read the rankings.'));
+      return text(JSON.stringify(response.body, null, 2), response.body);
     }
 
     default:

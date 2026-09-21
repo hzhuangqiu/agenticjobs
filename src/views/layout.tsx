@@ -12,6 +12,9 @@ import { raw } from 'hono/html';
 import type { Viewer } from '../core/auth.ts';
 import { jsonForScript } from '../markup/escape.ts';
 import { renderMarkdown } from '../markup/markdown.ts';
+import type { SkillCount } from '../core/skills.ts';
+import { pathForQuery } from '../core/landing.ts';
+import { EMPTY_QUERY } from '../schema/query.ts';
 
 export interface PageProps {
   title: string;
@@ -30,6 +33,10 @@ export interface PageProps {
   isDirectory?: boolean;
   /** Conversations with something unread, shown beside Inbox. */
   unread?: number;
+  /** Notifications not read yet, shown beside Notifications. */
+  alerts?: number;
+  /** The skills the footer links to, most common first. */
+  skills?: SkillCount[];
 }
 
 export const Layout: FC<PropsWithChildren<PageProps>> = (props) => {
@@ -46,6 +53,8 @@ export const Layout: FC<PropsWithChildren<PageProps>> = (props) => {
     openprofile,
     isDirectory,
     unread = 0,
+    alerts = 0,
+    skills = [],
     children,
   } = props;
 
@@ -169,6 +178,20 @@ export const Layout: FC<PropsWithChildren<PageProps>> = (props) => {
                       </>
                     )}
                   </a>
+                  <a
+                    href="/notifications"
+                    aria-current={path.startsWith('/notifications') ? 'page' : undefined}
+                  >
+                    Notifications
+                    {alerts > 0 && (
+                      <>
+                        {' '}
+                        <span class="nav-count" aria-label={`${alerts} unread`}>
+                          {alerts}
+                        </span>
+                      </>
+                    )}
+                  </a>
                   <a href="/me" aria-current={path.startsWith('/me') ? 'page' : undefined}>
                     You
                   </a>
@@ -184,7 +207,21 @@ export const Layout: FC<PropsWithChildren<PageProps>> = (props) => {
           <div class="container">{children}</div>
         </main>
         <footer class="site-footer">
+          {skills.length > 0 && (
+            <div class="container footer-skills">
+              <span>Popular skills:</span>
+              {skills.map((skill) => (
+                <a href={pathForQuery({ ...EMPTY_QUERY, tags: [skill.skill] }) ?? '/'}>
+                  {skill.skill}
+                </a>
+              ))}
+              <a href="/skills">all skills</a>
+            </div>
+          )}
           <div class="container">
+            <a href="/popular">Popular</a>
+            <a href="/most-profitable">Most profitable</a>
+            <a href="/agents">Agents</a>
             <span>
               {boardName} runs on{' '}
               <a href="https://github.com/profullstack/agenticjobs">agenticjobs</a>, MIT licensed.

@@ -13,7 +13,7 @@
  * drifted, which is the only version of this rule that survives contact.
  */
 
-const VERSION = '61271df2';
+const VERSION = '50eb65db';
 const SHELL = `shell-${VERSION}`;
 const ASSETS = ['/assets/app.css', '/assets/tokens.css', '/assets/icon.svg'];
 
@@ -49,7 +49,7 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   // Never cache anything under /api or /me: one is live data, the other is a
   // signed-in person's own pages.
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/me') || url.pathname.startsWith('/tracker') || url.pathname.startsWith('/fleets/')) return;
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/me') || url.pathname.startsWith('/tracker') || url.pathname.startsWith('/fleets/') || url.pathname.startsWith('/notifications')) return;
 
   if (ASSETS.includes(url.pathname)) {
     // Answer from the cache, then refresh it in the background. A stale asset
@@ -88,5 +88,41 @@ self.addEventListener('fetch', (event) => {
           ),
       ),
     ),
+  );
+});
+
+/*
+ * Push. The payload is JSON the board encrypted to this browser's key:
+ * { title, body, url }. Clicking the notification opens the listing, in a
+ * tab the site already has if there is one.
+ */
+self.addEventListener('push', (event) => {
+  let payload = { title: 'New listing', body: '', url: '/notifications' };
+  try {
+    payload = Object.assign(payload, event.data ? event.data.json() : {});
+  } catch (_) {
+    /* A payload that is not JSON still deserves a notification. */
+  }
+  event.waitUntil(
+    self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: '/assets/icon.svg',
+      badge: '/assets/icon.svg',
+      data: { url: payload.url },
+      tag: payload.url,
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = new URL((event.notification.data && event.notification.data.url) || '/notifications', self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      for (const client of windows) {
+        if (client.url === target && 'focus' in client) return client.focus();
+      }
+      return self.clients.openWindow(target);
+    }),
   );
 });

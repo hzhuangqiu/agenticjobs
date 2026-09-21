@@ -73,12 +73,7 @@ import {
 } from '../../core/resumes.ts';
 import { importDocument, ImportProblem, MAX_UPLOAD_BYTES } from '../../core/import.ts';
 import { deliverMagicLink } from '../../core/mail.ts';
-import {
-  resumeForViewer,
-  tagsFrom,
-  toCandidateSummary,
-  withTags,
-} from '../../core/candidates.ts';
+import { resumeForViewer, tagsFrom, toCandidateSummary, withTags } from '../../core/candidates.ts';
 import {
   candidateSlugFor,
   deleteUpdate,
@@ -139,6 +134,7 @@ import { disconnect, finishConnect, getAccount } from '../../core/coinpay.ts';
 import { coinpayRedirectUri } from './pages.tsx';
 import { descriptorFor } from './descriptor.ts';
 import { openApiDocument } from './openapi.ts';
+import { afterPublish, countView } from '../publish.ts';
 import type { AppEnv } from '../deps.ts';
 
 type Ctx = Context<AppEnv>;
@@ -194,8 +190,12 @@ async function readBody(c: Ctx): Promise<Record<string, unknown>> {
 function payPatch(body: Record<string, unknown>, job: Job): Record<string, unknown> {
   const sent = (key: string): boolean => body[key] !== undefined && body[key] !== null;
   const hasLines =
-    sent('pay') || sent('payLines') || sent('salaryMin') || sent('salaryMax') ||
-    sent('salaryPeriod') || sent('salaryCurrency');
+    sent('pay') ||
+    sent('payLines') ||
+    sent('salaryMin') ||
+    sent('salaryMax') ||
+    sent('salaryPeriod') ||
+    sent('salaryCurrency');
   const hasUnpaid = sent('salaryUnpaid') || sent('unpaid') || sent('payUnpaid');
   return {
     ...(hasLines
@@ -233,6 +233,7 @@ export function apiRoutes(): Hono<AppEnv> {
     const { pool, config } = c.get('deps');
     const job = await getJobBySlug(pool, c.req.param('slug'));
     if (job === null) return fail(c, 404, 'not_found', 'No such job, or it is not published.');
+    await countView(c, job);
     return c.json({
       job,
       html: renderMarkdown(job.description, { headingOffset: 2 }),
@@ -346,8 +347,7 @@ export function apiRoutes(): Hono<AppEnv> {
         ...(submit
           ? {}
           : {
-              message:
-                'Held as a draft. Nobody at the employer can see it until it is submitted.',
+              message: 'Held as a draft. Nobody at the employer can see it until it is submitted.',
               submitWith: `POST /api/v1/applications/${application.id}/submit`,
             }),
       },
@@ -387,6 +387,7 @@ export function apiRoutes(): Hono<AppEnv> {
     const job = await createJob(pool, input);
     if (publish) {
       const published = await setStatus(pool, job.id, 'published');
+      if (published !== null) await afterPublish(c, published);
       return c.json({ job: published ?? job }, 201);
     }
     return c.json({ job }, 201);
@@ -449,11 +450,18 @@ export function apiRoutes(): Hono<AppEnv> {
         title: imported.title,
         description: imported.description,
         sourceUrl: url,
-        ...(imported.employmentType === undefined ? {} : { employmentType: imported.employmentType }),
+        ...(imported.employmentType === undefined
+          ? {}
+          : { employmentType: imported.employmentType }),
         ...(imported.workplace === undefined ? {} : { workplace: imported.workplace }),
         ...(imported.location === undefined ? {} : { location: imported.location }),
       });
-      return c.json({ job: updated ?? existing, via: imported.via, warnings: imported.warnings, created: false });
+      return c.json({
+        job: updated ?? existing,
+        via: imported.via,
+        warnings: imported.warnings,
+        created: false,
+      });
     }
 
     const orgSlug = typeof body['org'] === 'string' ? body['org'] : '';
@@ -470,7 +478,9 @@ export function apiRoutes(): Hono<AppEnv> {
         title: imported.title,
         description: imported.description,
         agentPolicy: typeof body['agentPolicy'] === 'string' ? body['agentPolicy'] : 'welcome',
-        ...(imported.employmentType === undefined ? {} : { employmentType: imported.employmentType }),
+        ...(imported.employmentType === undefined
+          ? {}
+          : { employmentType: imported.employmentType }),
         ...(imported.workplace === undefined ? {} : { workplace: imported.workplace }),
         ...(imported.location === undefined ? {} : { location: imported.location }),
       },
@@ -559,6 +569,7 @@ export function apiRoutes(): Hono<AppEnv> {
       if (problem !== null) return fail(c, 400, 'pay_required', problem);
     }
     const updated = await setStatus(pool, job.id, status);
+    if (status === 'published' && updated !== null) await afterPublish(c, updated);
     return c.json({ job: updated });
   });
 
@@ -576,10 +587,12 @@ export function apiRoutes(): Hono<AppEnv> {
     const applications = await listApplications(pool, job.id);
     const withResumes = await Promise.all(
       applications.map(async (application) => {
-        const row = await pool.query<{ resume_markdown: string | null; resume_title: string | null }>(
-          `select resume_markdown, resume_title from applications where id = $1`,
-          [application.id],
-        );
+        const row = await pool.query<{
+          resume_markdown: string | null;
+          resume_title: string | null;
+        }>(`select resume_markdown, resume_title from applications where id = $1`, [
+          application.id,
+        ]);
         return {
           ...application,
           resume: row.rows[0]?.resume_markdown ?? null,
@@ -606,7 +619,12 @@ export function apiRoutes(): Hono<AppEnv> {
     const body = await c.req.json().catch(() => ({}) as Record<string, unknown>);
     const status = (body as { status?: unknown }).status;
     if (!isApplicationDecision(status)) {
-      return fail(c, 400, 'bad_status', `status must be one of ${APPLICATION_DECISIONS.join(', ')}.`);
+      return fail(
+        c,
+        400,
+        'bad_status',
+        `status must be one of ${APPLICATION_DECISIONS.join(', ')}.`,
+      );
     }
 
     const application = await decideApplication(pool, {
@@ -779,7 +797,10 @@ export function apiRoutes(): Hono<AppEnv> {
     if (viewer === null) return fail(c, 401, 'unauthenticated', 'Sign in first.');
     const resume = await getResume(pool, viewer.id, c.req.param('slug'));
     if (resume === null) return fail(c, 404, 'not_found', 'No such resume.');
-    return c.json({ resume, html: renderMarkdown(resume.markdown, { headingOffset: 1, noImages: true }) });
+    return c.json({
+      resume,
+      html: renderMarkdown(resume.markdown, { headingOffset: 1, noImages: true }),
+    });
   });
 
   api.post('/resumes', async (c) => {
@@ -863,13 +884,29 @@ export function apiRoutes(): Hono<AppEnv> {
           ...(page.title ? { title: page.title.slice(0, 120) } : {}),
           source: { name: url, mime: 'text/markdown', bytes: Buffer.from(page.markdown, 'utf8') },
         });
-        return c.json({ resume, via: page.via, url, warnings: ['Read from a page. Check every line before publishing; a page carries navigation and footers a resume does not.'] }, 201);
+        return c.json(
+          {
+            resume,
+            via: page.via,
+            url,
+            warnings: [
+              'Read from a page. Check every line before publishing; a page carries navigation and footers a resume does not.',
+            ],
+          },
+          201,
+        );
       } catch (error) {
         if (error instanceof BrowseProblem) return fail(c, 400, 'unreadable_page', error.message);
         throw error;
       }
     }
-    if (file === null) return fail(c, 400, 'no_file', 'Attach the document as a "file" field, or send {"url": "https://..."} to read a page.');
+    if (file === null)
+      return fail(
+        c,
+        400,
+        'no_file',
+        'Attach the document as a "file" field, or send {"url": "https://..."} to read a page.',
+      );
     if (file.size > MAX_UPLOAD_BYTES) {
       return fail(c, 413, 'too_large', `The limit is ${MAX_UPLOAD_BYTES / 1024 / 1024}MB.`);
     }
@@ -966,7 +1003,10 @@ export function apiRoutes(): Hono<AppEnv> {
         return fail(c, 401, 'unauthorised', 'Sign in to read the updates from who you follow.');
       }
       const mine = await listFollowedUpdates(pool, viewer.id);
-      return c.json({ items: mine.map((update) => withUrl(update, config.publicUrl)), total: mine.length });
+      return c.json({
+        items: mine.map((update) => withUrl(update, config.publicUrl)),
+        total: mine.length,
+      });
     }
 
     const scope = await scopeFrom(pool, params);
@@ -977,7 +1017,9 @@ export function apiRoutes(): Hono<AppEnv> {
     return c.json({
       items: items.map((update) => withUrl(update, config.publicUrl)),
       total: items.length,
-      ...(scope.kind === 'author' ? { author: { kind: scope.author, slug: scope.slug, name: scope.name } } : {}),
+      ...(scope.kind === 'author'
+        ? { author: { kind: scope.author, slug: scope.slug, name: scope.name } }
+        : {}),
     });
   });
 
@@ -1123,7 +1165,8 @@ export function apiRoutes(): Hono<AppEnv> {
   api.get('/candidates/:slug/recommendations', async (c) => {
     const { pool } = c.get('deps');
     const userId = await userForCandidate(pool, c.req.param('slug'));
-    if (userId === null) return fail(c, 404, 'not_found', `Nobody here is "${c.req.param('slug')}".`);
+    if (userId === null)
+      return fail(c, 404, 'not_found', `Nobody here is "${c.req.param('slug')}".`);
     const items = await listApproved(pool, { kind: 'candidate', userId });
     return c.json({ items, total: items.length });
   });
@@ -1131,7 +1174,8 @@ export function apiRoutes(): Hono<AppEnv> {
   api.get('/orgs/:slug/recommendations', async (c) => {
     const { pool } = c.get('deps');
     const org = await getOrgBySlug(pool, c.req.param('slug'));
-    if (org === null) return fail(c, 404, 'not_found', `No employer here is "${c.req.param('slug')}".`);
+    if (org === null)
+      return fail(c, 404, 'not_found', `No employer here is "${c.req.param('slug')}".`);
     const items = await listApproved(pool, { kind: 'employer', orgId: org.id });
     return c.json({ items, total: items.length });
   });
@@ -1141,7 +1185,10 @@ export function apiRoutes(): Hono<AppEnv> {
    * by a page, or as an employer you post for ("as"). It is pending until
    * the subject approves it, and writing again replaces it.
    */
-  const recommend = async (c: Ctx, target: { candidate?: string; org?: string }): Promise<Response> => {
+  const recommend = async (
+    c: Ctx,
+    target: { candidate?: string; org?: string },
+  ): Promise<Response> => {
     const { pool, config, mailer } = c.get('deps');
     const viewer = viewerOf(c);
     if (viewer === null) return fail(c, 401, 'unauthorised', 'Sign in to write a recommendation.');
@@ -1153,7 +1200,12 @@ export function apiRoutes(): Hono<AppEnv> {
     if (typeof resolved === 'string') {
       const notFound = /^Nobody here|^No employer/.test(resolved);
       const noPage = /Publish a resume|signed by a page/.test(resolved);
-      return fail(c, notFound ? 404 : noPage ? 403 : 400, notFound ? 'not_found' : noPage ? 'no_profile' : 'invalid', resolved);
+      return fail(
+        c,
+        notFound ? 404 : noPage ? 403 : 400,
+        notFound ? 'not_found' : noPage ? 'no_profile' : 'invalid',
+        resolved,
+      );
     }
     const written = await writeRecommendation(pool, viewer.id, {
       as: resolved.as,
@@ -1162,7 +1214,12 @@ export function apiRoutes(): Hono<AppEnv> {
       relationship: body['relationship'],
     });
     if (typeof written === 'string') {
-      return fail(c, /limit/.test(written) ? 429 : 400, /limit/.test(written) ? 'rate_limited' : 'invalid', written);
+      return fail(
+        c,
+        /limit/.test(written) ? 429 : 400,
+        /limit/.test(written) ? 'rate_limited' : 'invalid',
+        written,
+      );
     }
     void notifySubject({
       pool,
@@ -1175,16 +1232,26 @@ export function apiRoutes(): Hono<AppEnv> {
     return c.json({ recommendation: written }, 201);
   };
 
-  api.post('/candidates/:slug/recommendations', (c) => recommend(c, { candidate: c.req.param('slug') }));
+  api.post('/candidates/:slug/recommendations', (c) =>
+    recommend(c, { candidate: c.req.param('slug') }),
+  );
   api.post('/orgs/:slug/recommendations', (c) => recommend(c, { org: c.req.param('slug') }));
 
   /** About you and your employers, every status, and what you wrote. */
   api.get('/me/recommendations', async (c) => {
     const { pool } = c.get('deps');
     const viewer = viewerOf(c);
-    if (viewer === null) return fail(c, 401, 'unauthorised', 'Sign in to see your recommendations.');
-    const [received, given] = await Promise.all([listReceived(pool, viewer.id), listGiven(pool, viewer.id)]);
-    return c.json({ received, given, pending: received.filter((item) => item.status === 'pending').length });
+    if (viewer === null)
+      return fail(c, 401, 'unauthorised', 'Sign in to see your recommendations.');
+    const [received, given] = await Promise.all([
+      listReceived(pool, viewer.id),
+      listGiven(pool, viewer.id),
+    ]);
+    return c.json({
+      received,
+      given,
+      pending: received.filter((item) => item.status === 'pending').length,
+    });
   });
 
   /**
@@ -1200,11 +1267,18 @@ export function apiRoutes(): Hono<AppEnv> {
     const action = c.req.param('action');
     if (action === 'withdraw') {
       const gone = await withdrawRecommendation(pool, viewer.id, id);
-      if (!gone) return fail(c, 404, 'not_found', 'No such recommendation, or it is not yours to withdraw.');
+      if (!gone)
+        return fail(c, 404, 'not_found', 'No such recommendation, or it is not yours to withdraw.');
       return c.json({ withdrawn: true });
     }
-    const decided = await decideRecommendation(pool, viewer.id, id, action === 'approve' ? 'approved' : 'rejected');
-    if (decided === null) return fail(c, 404, 'not_found', 'No such recommendation, or it is not yours to decide.');
+    const decided = await decideRecommendation(
+      pool,
+      viewer.id,
+      id,
+      action === 'approve' ? 'approved' : 'rejected',
+    );
+    if (decided === null)
+      return fail(c, 404, 'not_found', 'No such recommendation, or it is not yours to decide.');
     return c.json({ recommendation: decided });
   });
 
@@ -1263,7 +1337,8 @@ export function apiRoutes(): Hono<AppEnv> {
 
   api.get('/directory/instances', async (c) => {
     const { pool, config } = c.get('deps');
-    if (!config.isDirectory) return fail(c, 404, 'not_a_directory', 'This instance is not a directory.');
+    if (!config.isDirectory)
+      return fail(c, 404, 'not_a_directory', 'This instance is not a directory.');
     const params = new URL(c.req.url).searchParams;
     const items = await listInstances(pool, {
       topic: params.get('topic'),
@@ -1276,7 +1351,8 @@ export function apiRoutes(): Hono<AppEnv> {
 
   api.get('/directory/topics', async (c) => {
     const { pool, config } = c.get('deps');
-    if (!config.isDirectory) return fail(c, 404, 'not_a_directory', 'This instance is not a directory.');
+    if (!config.isDirectory)
+      return fail(c, 404, 'not_a_directory', 'This instance is not a directory.');
     return c.json({ items: await listTopics(pool) });
   });
 
@@ -1310,7 +1386,8 @@ export function apiRoutes(): Hono<AppEnv> {
   /** One question, every instance the directory knows about. */
   api.get('/directory/search', async (c) => {
     const { pool, config } = c.get('deps');
-    if (!config.isDirectory) return fail(c, 404, 'not_a_directory', 'This instance is not a directory.');
+    if (!config.isDirectory)
+      return fail(c, 404, 'not_a_directory', 'This instance is not a directory.');
     const params = new URL(c.req.url).searchParams;
     const query = parseQuery(params);
     const instances = await listInstances(pool, { onlineOnly: true, limit: 40 });
@@ -1353,14 +1430,21 @@ export function apiRoutes(): Hono<AppEnv> {
       employer: typeof body['employer'] === 'string' ? body['employer'] : null,
     });
     if (to === null) {
-      return fail(c, 404, 'not_found', 'Name a candidate or an employer by slug. Nobody here matches.');
+      return fail(
+        c,
+        404,
+        'not_found',
+        'Name a candidate or an employer by slug. Nobody here matches.',
+      );
     }
     const jobSlug = typeof body['job'] === 'string' ? body['job'].trim() : '';
     const job = jobSlug === '' ? null : await getJobBySlug(pool, jobSlug);
-    if (jobSlug !== '' && job === null) return fail(c, 404, 'not_found', `No job with the slug "${jobSlug}".`);
+    if (jobSlug !== '' && job === null)
+      return fail(c, 404, 'not_found', `No job with the slug "${jobSlug}".`);
     const asSlug = typeof body['as'] === 'string' ? body['as'].trim() : '';
     const asOrg = asSlug === '' ? null : await getOrgBySlug(pool, asSlug);
-    if (asSlug !== '' && asOrg === null) return fail(c, 404, 'not_found', `No employer with the slug "${asSlug}".`);
+    if (asSlug !== '' && asOrg === null)
+      return fail(c, 404, 'not_found', `No employer with the slug "${asSlug}".`);
 
     const started = await startThread(pool, viewer.id, to, {
       subject: body['subject'],
@@ -1394,7 +1478,9 @@ export function apiRoutes(): Hono<AppEnv> {
     const thread = await getThread(pool, id, viewer.id);
     if (thread === null) return fail(c, 404, 'not_found', 'No such conversation.');
     const invoices = await Promise.all(
-      (await listInvoicesIn(pool, coinpay, id)).map((invoice) => syncInvoice(pool, coinpay, invoice)),
+      (await listInvoicesIn(pool, coinpay, id)).map((invoice) =>
+        syncInvoice(pool, coinpay, invoice),
+      ),
     );
     await markRead(pool, id, viewer.id);
     return c.json({ thread, invoices });
@@ -1533,7 +1619,12 @@ export function apiRoutes(): Hono<AppEnv> {
     if (invoice === null) return fail(c, 404, 'not_found', 'No such invoice.');
     const cancelled = await cancelInvoice(pool, id, viewer.id);
     if (!cancelled) {
-      return fail(c, 409, 'not_cancellable', 'Only the sender can cancel an invoice, and only while it is unpaid.');
+      return fail(
+        c,
+        409,
+        'not_cancellable',
+        'Only the sender can cancel an invoice, and only while it is unpaid.',
+      );
     }
     return c.json({ ok: true });
   });
@@ -1578,7 +1669,8 @@ export function apiRoutes(): Hono<AppEnv> {
       return c.redirect(`/me?coinpay=${encodeURIComponent(`CoinPay said: ${said}`)}#billing`, 303);
     }
     if (code === '' || state === '') return fail(c, 400, 'bad_request', 'Missing code or state.');
-    if (coinpay === null) return fail(c, 404, 'not_found', 'This board has no payment rail configured.');
+    if (coinpay === null)
+      return fail(c, 404, 'not_found', 'This board has no payment rail configured.');
     const done = await finishConnect(pool, coinpay, {
       state,
       code,
@@ -1599,15 +1691,22 @@ export function apiRoutes(): Hono<AppEnv> {
    */
   api.post('/coinpay/webhook', async (c) => {
     const { pool, coinpay } = c.get('deps');
-    if (coinpay === null) return fail(c, 404, 'not_found', 'This board has no payment rail configured.');
+    if (coinpay === null)
+      return fail(c, 404, 'not_found', 'This board has no payment rail configured.');
     const raw = await c.req.text();
     if (!coinpay.verifyWebhook(raw, c.req.header('x-coinpay-signature'))) {
-      return fail(c, 401, 'bad_signature', "The signature does not match this board's webhook secret.");
+      return fail(
+        c,
+        401,
+        'bad_signature',
+        "The signature does not match this board's webhook secret.",
+      );
     }
     let payload: Record<string, unknown>;
     try {
       const parsed = JSON.parse(raw) as unknown;
-      payload = typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
+      payload =
+        typeof parsed === 'object' && parsed !== null ? (parsed as Record<string, unknown>) : {};
     } catch {
       return fail(c, 400, 'bad_request', 'The body is not JSON.');
     }

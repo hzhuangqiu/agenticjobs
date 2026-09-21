@@ -3,6 +3,8 @@ import type { Config } from '../config.ts';
 import type { Viewer } from '../core/auth.ts';
 import type { Mailer } from '../core/mail.ts';
 import type { CoinPayClient } from '../core/coinpay.ts';
+import type { Leaderboard } from '@profullstack/leaderboard';
+import type { SkillCount } from '../core/skills.ts';
 
 export interface Deps {
   pool: pg.Pool;
@@ -11,6 +13,8 @@ export interface Deps {
   mailer: Mailer | null;
   /** Null when billing is not configured, which is also a supported state. */
   coinpay: CoinPayClient | null;
+  /** The rankings, projected over the listings. */
+  rankings: Leaderboard;
 }
 
 /**
@@ -26,5 +30,9 @@ export interface AppEnv {
     deps: Deps;
     /** Conversations with something unread, for the nav. Pages only. */
     unread: number;
+    /** Notifications not yet read, for the nav. Pages only. */
+    alerts: number;
+    /** The skills the footer links to. Pages only. */
+    skills: SkillCount[];
   };
 }

@@ -128,6 +128,9 @@ import { readSpec } from './specs.ts';
 import { beginConnect, disconnect, getAccount, refreshWallets } from '../../core/coinpay.ts';
 import { listInvoicesFor } from '../../core/invoices.ts';
 import { BillingCard } from '../../views/inbox.tsx';
+import { AgentsCard } from '../../views/agents.tsx';
+import { listAgents } from '../../core/agents.ts';
+import { afterPublish, countView } from '../publish.ts';
 import type { AppEnv } from '../deps.ts';
 
 type Ctx = Context<AppEnv>;
@@ -138,13 +141,18 @@ type Ctx = Context<AppEnv>;
  * Typed as the subset of PageProps it actually supplies, so a page that
  * forgets `title` is a compile error rather than a blank browser tab.
  */
-type Shell = Pick<PageProps, 'viewer' | 'boardName' | 'publicUrl' | 'path' | 'isDirectory' | 'unread'>;
+type Shell = Pick<
+  PageProps,
+  'viewer' | 'boardName' | 'publicUrl' | 'path' | 'isDirectory' | 'unread' | 'alerts' | 'skills'
+>;
 
 export function shell(c: Ctx): Shell {
   const { config } = c.get('deps');
   return {
     viewer: c.get('viewer'),
     unread: c.get('unread'),
+    alerts: c.get('alerts'),
+    skills: c.get('skills'),
     boardName: config.boardName,
     publicUrl: config.publicUrl,
     path: new URL(c.req.url).pathname,
@@ -162,8 +170,10 @@ export function coinpayRedirectUri(publicUrl: string): string {
 
 /** The one-word states the callback redirects with, said in a sentence. */
 export function coinpayNotice(code: string): string {
-  if (code === 'connected') return 'CoinPay connected. Invoices you send settle to the wallets below.';
-  if (code === 'disconnected') return 'CoinPay disconnected. Invoices already sent keep the wallet they were sent with.';
+  if (code === 'connected')
+    return 'CoinPay connected. Invoices you send settle to the wallets below.';
+  if (code === 'disconnected')
+    return 'CoinPay disconnected. Invoices already sent keep the wallet they were sent with.';
   return code;
 }
 
@@ -246,17 +256,14 @@ export function pageRoutes(): Hono<AppEnv> {
     const query = parseQuery(new URL(c.req.url).searchParams);
     const page = await searchJobs(pool, query);
     return c.html(
-      <Layout
-        {...shell(c)}
-        title={config.boardName}
-        description={config.boardTagline}
-      >
+      <Layout {...shell(c)} title={config.boardName} description={config.boardTagline}>
         <JobList
           page={page}
           query={query}
           boardName={config.boardName}
           tagline={config.boardTagline}
           publicUrl={config.publicUrl}
+          signedIn={c.get('viewer') !== null}
         />
       </Layout>,
     );
@@ -267,6 +274,7 @@ export function pageRoutes(): Hono<AppEnv> {
     const viewer = c.get('viewer');
     const job = await getJobBySlug(pool, c.req.param('slug'));
     if (job === null) return c.notFound();
+    await countView(c, job);
 
     const [resumes, member] = await Promise.all([
       viewer === null ? Promise.resolve([]) : listResumes(pool, viewer.id),
@@ -429,7 +437,13 @@ export function pageRoutes(): Hono<AppEnv> {
       followerCount(pool, target),
       viewer === null ? Promise.resolve(false) : isFollowing(pool, viewer.id, target),
       listApproved(pool, { kind: 'candidate', userId: resume.userId }),
-      recommendFormFor(c, { candidate: slug }, `/candidates/${slug}/recommend`, recommend?.values ?? {}, recommend?.error),
+      recommendFormFor(
+        c,
+        { candidate: slug },
+        `/candidates/${slug}/recommend`,
+        recommend?.values ?? {},
+        recommend?.error,
+      ),
     ]);
 
     const social: SocialProps = {
@@ -638,15 +652,22 @@ export function pageRoutes(): Hono<AppEnv> {
     const query = parseQuery(params);
     const viewer = c.get('viewer');
     const target: Target = { kind: 'employer', orgId: org.id };
-    const [page, updates, followers, following, member, recommendations, recommendForm] = await Promise.all([
-      searchJobs(pool, query),
-      listUpdatesFor(pool, target),
-      followerCount(pool, target),
-      viewer === null ? Promise.resolve(false) : isFollowing(pool, viewer.id, target),
-      viewer === null ? Promise.resolve(false) : isMember(pool, viewer.id, org.id),
-      listApproved(pool, { kind: 'employer', orgId: org.id }),
-      recommendFormFor(c, { org: slug }, `/employers/${slug}/recommend`, recommend?.values ?? {}, recommend?.error),
-    ]);
+    const [page, updates, followers, following, member, recommendations, recommendForm] =
+      await Promise.all([
+        searchJobs(pool, query),
+        listUpdatesFor(pool, target),
+        followerCount(pool, target),
+        viewer === null ? Promise.resolve(false) : isFollowing(pool, viewer.id, target),
+        viewer === null ? Promise.resolve(false) : isMember(pool, viewer.id, org.id),
+        listApproved(pool, { kind: 'employer', orgId: org.id }),
+        recommendFormFor(
+          c,
+          { org: slug },
+          `/employers/${slug}/recommend`,
+          recommend?.values ?? {},
+          recommend?.error,
+        ),
+      ]);
 
     const social: SocialProps = {
       as: org.name,
@@ -741,7 +762,10 @@ export function pageRoutes(): Hono<AppEnv> {
     const viewer = requireViewer(c);
     if (viewer instanceof Response) return viewer;
     const form = await formOf(c);
-    const resolved = await resolveRecommendation(pool, viewer.id, { ...target, ...(form['as'] === undefined ? {} : { as: form['as'] }) });
+    const resolved = await resolveRecommendation(pool, viewer.id, {
+      ...target,
+      ...(form['as'] === undefined ? {} : { as: form['as'] }),
+    });
     if (typeof resolved === 'string') return back({ values: form, error: resolved });
     const written = await writeRecommendation(pool, viewer.id, {
       as: resolved.as,
@@ -758,13 +782,18 @@ export function pageRoutes(): Hono<AppEnv> {
       recommendation: written,
       subject: resolved.subject,
     }).catch(() => undefined);
-    const page = target.candidate !== undefined ? `/candidates/${target.candidate}` : `/employers/${target.org ?? ''}`;
+    const page =
+      target.candidate !== undefined
+        ? `/candidates/${target.candidate}`
+        : `/employers/${target.org ?? ''}`;
     return c.redirect(`${page}?recommended=1#recommend`, 303);
   };
 
   pages.post('/candidates/:slug/recommend', (c) => {
     const slug = c.req.param('slug');
-    return recommendFrom(c, { candidate: slug }, (error) => candidatePage(c, slug, undefined, error));
+    return recommendFrom(c, { candidate: slug }, (error) =>
+      candidatePage(c, slug, undefined, error),
+    );
   });
 
   pages.post('/employers/:slug/recommend', (c) => {
@@ -782,7 +811,12 @@ export function pageRoutes(): Hono<AppEnv> {
     const done =
       action === 'withdraw'
         ? await withdrawRecommendation(pool, viewer.id, id)
-        : (await decideRecommendation(pool, viewer.id, id, action === 'approve' ? 'approved' : 'rejected')) !== null;
+        : (await decideRecommendation(
+            pool,
+            viewer.id,
+            id,
+            action === 'approve' ? 'approved' : 'rejected',
+          )) !== null;
     if (!done) return c.notFound();
     return c.redirect('/me#recommendations', 303);
   });
@@ -964,7 +998,9 @@ export function pageRoutes(): Hono<AppEnv> {
         <DevicePage
           signedIn
           done={approved}
-          {...(approved ? {} : { error: 'That code is unknown or has expired. Ask the terminal for a new one.' })}
+          {...(approved
+            ? {}
+            : { error: 'That code is unknown or has expired. Ask the terminal for a new one.' })}
         />
       </Layout>,
       approved ? 200 : 400,
@@ -1007,15 +1043,17 @@ export function pageRoutes(): Hono<AppEnv> {
     );
 
     const { coinpay } = c.get('deps');
-    const [candidateSlug, updates, following, account, invoices, received, given] = await Promise.all([
-      candidateSlugFor(pool, viewer.id),
-      listUpdatesFor(pool, { kind: 'candidate', userId: viewer.id }),
-      listFollowing(pool, viewer.id),
-      getAccount(pool, viewer.id),
-      listInvoicesFor(pool, coinpay, viewer.id),
-      listReceived(pool, viewer.id),
-      listGiven(pool, viewer.id),
-    ]);
+    const [candidateSlug, updates, following, account, invoices, received, given, agents] =
+      await Promise.all([
+        candidateSlugFor(pool, viewer.id),
+        listUpdatesFor(pool, { kind: 'candidate', userId: viewer.id }),
+        listFollowing(pool, viewer.id),
+        getAccount(pool, viewer.id),
+        listInvoicesFor(pool, coinpay, viewer.id),
+        listReceived(pool, viewer.id),
+        listGiven(pool, viewer.id),
+        listAgents(pool, viewer.id),
+      ]);
     const notice = new URL(c.req.url).searchParams.get('coinpay');
 
     return c.html(
@@ -1038,6 +1076,7 @@ export function pageRoutes(): Hono<AppEnv> {
           updateMax={BODY_MAX}
           recommendations={{ received, given }}
         >
+          <AgentsCard agents={agents} />
           <BillingCard
             enabled={coinpay !== null}
             account={account}
@@ -1058,7 +1097,13 @@ export function pageRoutes(): Hono<AppEnv> {
     if (viewer instanceof Response) return viewer;
     if (coinpay === null) return c.text('This board has no payment rail configured.\n', 404);
     const next = safeRedirect(new URL(c.req.url).searchParams.get('next')) ?? '/me#billing';
-    const url = await beginConnect(pool, coinpay, viewer.id, coinpayRedirectUri(config.publicUrl), next);
+    const url = await beginConnect(
+      pool,
+      coinpay,
+      viewer.id,
+      coinpayRedirectUri(config.publicUrl),
+      next,
+    );
     return c.redirect(url, 302);
   });
 
@@ -1068,7 +1113,8 @@ export function pageRoutes(): Hono<AppEnv> {
     if (viewer instanceof Response) return viewer;
     if (coinpay === null) return c.redirect('/me#billing', 303);
     const result = await refreshWallets(pool, coinpay, viewer.id);
-    const notice = typeof result === 'string' ? result : `Wallets refreshed: ${result.wallets.length}.`;
+    const notice =
+      typeof result === 'string' ? result : `Wallets refreshed: ${result.wallets.length}.`;
     return c.redirect(`/me?coinpay=${encodeURIComponent(notice)}#billing`, 303);
   });
 
@@ -1363,14 +1409,19 @@ export function pageRoutes(): Hono<AppEnv> {
     const applications = await listApplications(pool, job.id);
     const detailed = await Promise.all(
       applications.map(async (application) => {
-        const row = await pool.query<{ resume_markdown: string | null; resume_title: string | null }>(
-          `select resume_markdown, resume_title from applications where id = $1`,
-          [application.id],
-        );
+        const row = await pool.query<{
+          resume_markdown: string | null;
+          resume_title: string | null;
+        }>(`select resume_markdown, resume_title from applications where id = $1`, [
+          application.id,
+        ]);
         const markdown = row.rows[0]?.resume_markdown ?? null;
         return {
           ...application,
-          resume: markdown === null ? null : renderMarkdown(markdown, { headingOffset: 3, noImages: true }),
+          resume:
+            markdown === null
+              ? null
+              : renderMarkdown(markdown, { headingOffset: 3, noImages: true }),
           resumeTitle: row.rows[0]?.resume_title ?? null,
         };
       }),
@@ -1406,7 +1457,8 @@ export function pageRoutes(): Hono<AppEnv> {
       const problem = publishProblem(job);
       if (problem !== null) return manageJobPage(c, job.slug, problem);
     }
-    await setStatus(pool, job.id, publishing ? 'published' : 'closed');
+    const updated = await setStatus(pool, job.id, publishing ? 'published' : 'closed');
+    if (publishing && updated !== null) await afterPublish(c, updated);
     return c.redirect(`/me/jobs/${job.slug}`, 303);
   });
 

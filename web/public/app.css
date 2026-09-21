@@ -156,6 +156,18 @@ main {
   color: var(--muted-foreground);
 }
 
+/* The skill links above the footer proper: one row that wraps. */
+.footer-skills {
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+  gap: 0.5rem 0.9rem;
+}
+
+.thread.unread {
+  font-weight: 600;
+}
+
 /*
  * `1fr` means `minmax(auto, 1fr)`, and that `auto` floor is the widest child's
  * min-content. One long unbreakable string in a code block is then enough to

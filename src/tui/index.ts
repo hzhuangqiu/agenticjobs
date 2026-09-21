@@ -17,13 +17,18 @@ import { loadConfig } from '../client/config.ts';
 import type { Job } from '../schema/index.ts';
 import { render } from './views.ts';
 import {
+  closeOverlay,
+  hasOverlay,
   initialState,
   move,
   nextTab,
+  selectedAgent,
   selectedBoard,
   selectedDraft,
   selectedJob,
+  selectedThread,
   type DraftRow,
+  type Prompt,
   type TuiState,
 } from './state.ts';
 
@@ -91,6 +96,128 @@ export async function startTui(client: BoardClient): Promise<void> {
     invalidate({ ...state, listings, listingIndex: 0 });
   };
 
+  const loadInbox = async (): Promise<void> => {
+    if (!state.signedIn) return;
+    const result = await busy('reading the inbox', () => client.inbox());
+    if (result === null) return;
+    invalidate({ ...state, threads: result.items, unread: result.unread, threadIndex: 0 });
+  };
+
+  const openThread = async (id: string): Promise<void> => {
+    const result = await busy('opening', () => client.thread(id));
+    if (result === null) return;
+    invalidate({
+      ...state,
+      thread: { ...result.thread, invoices: result.invoices },
+      message: null,
+      // Opening it marked it read on the board; say so here without a refetch.
+      threads: state.threads.map((thread) =>
+        thread.id === id ? { ...thread, unread: 0 } : thread,
+      ),
+      unread: Math.max(
+        0,
+        state.unread - (state.threads.find((thread) => thread.id === id)?.unread ?? 0),
+      ),
+    });
+  };
+
+  const loadAgents = async (): Promise<void> => {
+    if (!state.signedIn) return;
+    const result = await busy('loading your agents', () => client.myAgents());
+    if (result === null) return;
+    invalidate({
+      ...state,
+      agents: result.items,
+      agentIndex: Math.min(state.agentIndex, Math.max(0, result.items.length - 1)),
+    });
+  };
+
+  const ask = (kind: Prompt['kind'], label: string, draft: Prompt['draft'] = {}): void => {
+    invalidate({ ...state, prompt: { kind, label, value: '', draft }, error: null, message: null });
+  };
+
+  /** What happens when a prompt is answered. */
+  const submitPrompt = async (prompt: Prompt): Promise<void> => {
+    const value = prompt.value.trim();
+    invalidate({ ...state, prompt: null });
+
+    if (prompt.kind === 'reply') {
+      const thread = state.thread;
+      if (thread === null || value === '') return;
+      const sent = await busy('sending', () => client.reply(thread.id, value));
+      if (sent === null) return;
+      await openThread(thread.id);
+      invalidate({ ...state, message: 'Sent.' });
+      return;
+    }
+
+    if (prompt.kind === 'agent-name') {
+      if (value.length < 2) {
+        invalidate({ ...state, error: 'A name of at least 2 characters.' });
+        return;
+      }
+      ask('agent-skills', `Skills for ${value}, comma separated (required)`, { name: value });
+      return;
+    }
+
+    if (prompt.kind === 'agent-skills') {
+      const skills = value
+        .split(',')
+        .map((skill) => skill.trim())
+        .filter((skill) => skill !== '');
+      if (skills.length === 0) {
+        // Required, so the wizard does not move on without them.
+        ask(
+          'agent-skills',
+          `Skills for ${prompt.draft.name ?? 'the agent'}: at least one, comma separated`,
+          prompt.draft,
+        );
+        return;
+      }
+      if (state.agents.length === 0) {
+        await registerAgent({ ...prompt.draft, skills });
+        return;
+      }
+      ask(
+        'agent-operator',
+        `Operated by which of your agents? (${state.agents.map((agent) => agent.slug).join(', ')}; enter for none)`,
+        { ...prompt.draft, skills },
+      );
+      return;
+    }
+
+    if (prompt.kind === 'agent-operator') {
+      await registerAgent(prompt.draft, value === '' ? undefined : value);
+      return;
+    }
+
+    if (prompt.kind === 'agent-remove') {
+      const agent = state.agent ?? selectedAgent(state);
+      if (agent === null) return;
+      if (value !== agent.slug) {
+        invalidate({ ...state, message: 'Kept. Type the slug exactly to remove it.' });
+        return;
+      }
+      const removed = await busy('removing', () => client.deleteAgent(agent.slug));
+      if (removed === null) return;
+      invalidate({ ...closeOverlay(state), message: `Removed ${agent.name}.` });
+      await loadAgents();
+    }
+  };
+
+  const registerAgent = async (draft: Prompt['draft'], operator?: string): Promise<void> => {
+    const result = await busy('registering', () =>
+      client.registerAgent({
+        name: draft.name ?? '',
+        skills: draft.skills ?? [],
+        ...(operator === undefined ? {} : { operator }),
+      }),
+    );
+    if (result === null) return;
+    invalidate({ ...state, message: `Registered ${result.agent.name}: ${result.url}` });
+    await loadAgents();
+  };
+
   const loadBoards = (): void => {
     const config = loadConfig();
     invalidate({
@@ -118,6 +245,30 @@ export async function startTui(client: BoardClient): Promise<void> {
 
   const handleKey = async (event: { key: string; ctrl?: boolean }): Promise<void> => {
     const key = event.key;
+
+    if (state.prompt !== null) {
+      const prompt = state.prompt;
+      if (key === 'escape') {
+        invalidate({ ...state, prompt: null, message: 'Cancelled.' });
+        return;
+      }
+      if (key === 'enter') {
+        await submitPrompt(prompt);
+        return;
+      }
+      if (key === 'backspace') {
+        invalidate({ ...state, prompt: { ...prompt, value: prompt.value.slice(0, -1) } });
+        return;
+      }
+      if (key === 'space') {
+        invalidate({ ...state, prompt: { ...prompt, value: `${prompt.value} ` } });
+        return;
+      }
+      if (key.length === 1 && event.ctrl !== true) {
+        invalidate({ ...state, prompt: { ...prompt, value: prompt.value + key } });
+      }
+      return;
+    }
 
     if (state.editing) {
       if (key === 'escape') {
@@ -155,8 +306,8 @@ export async function startTui(client: BoardClient): Promise<void> {
       await refresh(next.tab);
       return;
     }
-    if (key === 'escape' && state.detail !== null) {
-      invalidate({ ...state, detail: null });
+    if (key === 'escape' && hasOverlay(state)) {
+      invalidate(closeOverlay(state));
       return;
     }
     if (key === 'up' || key === 'k') {
@@ -176,6 +327,28 @@ export async function startTui(client: BoardClient): Promise<void> {
       if (key === 'a' || key === 'd') await apply(state.detail, key === 'd');
       return;
     }
+    if (state.thread !== null) {
+      if (key === 'm') ask('reply', `Reply to ${state.thread.with.name} (enter to send)`);
+      return;
+    }
+    if (state.agent !== null) {
+      if (key === 'x')
+        ask('agent-remove', `Type ${state.agent.slug} to remove ${state.agent.name}`);
+      return;
+    }
+    if (state.tab === 'agents' && key === 'n') {
+      if (!state.signedIn) {
+        invalidate({ ...state, error: `Sign in first: agenticjobs login ${client.server}` });
+        return;
+      }
+      ask('agent-name', 'Name of the agent you operate');
+      return;
+    }
+    if (state.tab === 'agents' && key === 'x') {
+      const agent = selectedAgent(state);
+      if (agent !== null) ask('agent-remove', `Type ${agent.slug} to remove ${agent.name}`);
+      return;
+    }
 
     if (key === 'enter') {
       await activate();
@@ -186,7 +359,10 @@ export async function startTui(client: BoardClient): Promise<void> {
       if (job === null) return;
       const action = key === 'p' ? 'publish' : 'close';
       const result = await busy(action, () =>
-        client.request<{ job: Job }>('POST', `/api/v1/jobs/${encodeURIComponent(job.slug)}/${action}`),
+        client.request<{ job: Job }>(
+          'POST',
+          `/api/v1/jobs/${encodeURIComponent(job.slug)}/${action}`,
+        ),
       );
       if (result !== null) {
         invalidate({ ...state, message: `${job.title} is now ${result.job.status}.` });
@@ -200,6 +376,16 @@ export async function startTui(client: BoardClient): Promise<void> {
     if (state.tab === 'find' || state.tab === 'listings') {
       const job = selectedJob(state);
       if (job !== null) invalidate({ ...state, detail: job, message: null });
+      return;
+    }
+    if (state.tab === 'inbox') {
+      const thread = selectedThread(state);
+      if (thread !== null) await openThread(thread.id);
+      return;
+    }
+    if (state.tab === 'agents') {
+      const agent = selectedAgent(state);
+      if (agent !== null) invalidate({ ...state, agent, message: null });
       return;
     }
     if (state.tab === 'drafts') {
@@ -268,8 +454,10 @@ export async function startTui(client: BoardClient): Promise<void> {
 
   const refresh = async (tab: TuiState['tab']): Promise<void> => {
     if (tab === 'find') await loadJobs();
+    else if (tab === 'inbox') await loadInbox();
     else if (tab === 'drafts') await loadDrafts();
     else if (tab === 'listings') await loadListings();
+    else if (tab === 'agents') await loadAgents();
     else loadBoards();
   };
 
@@ -287,6 +475,8 @@ export async function startTui(client: BoardClient): Promise<void> {
   await identify();
   await loadJobs();
   await loadDrafts();
+  // The inbox count sits on its tab from the first frame, like the drafts.
+  await loadInbox();
 
   await app.start();
 }

@@ -13,6 +13,69 @@ import type { InstanceDescriptor, InstanceListing } from '../schema/instance.ts'
 import { WELL_KNOWN_PATH } from '../schema/instance.ts';
 import { normaliseServer } from './config.ts';
 
+/** An agent as the API returns it. */
+export interface AgentRecord {
+  id: string;
+  slug: string;
+  name: string;
+  skills: string[];
+  description: string;
+  url: string | null;
+  public: boolean;
+  operator: { slug: string; name: string } | null;
+  operates: { slug: string; name: string }[];
+  owner: { name: string | null; candidateSlug: string | null };
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentInputRecord {
+  name?: string;
+  skills?: string[] | string;
+  description?: string;
+  url?: string;
+  operator?: string;
+  public?: boolean;
+}
+
+export interface WatchRecord {
+  id: string;
+  query: JobQuery;
+  label: string;
+  email: boolean;
+  path: string;
+  createdAt: string;
+  lastNotifiedAt: string | null;
+}
+
+export interface NotificationRecord {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  url: string | null;
+  createdAt: string;
+  readAt: string | null;
+}
+
+export interface RankingsRecord {
+  period: string;
+  boards: {
+    id: string;
+    label: string;
+    unit: string;
+    total: number;
+    rows: {
+      rank: number | null;
+      slug: string;
+      name: string;
+      value: number;
+      display: string;
+      url: string;
+    }[];
+  }[];
+}
+
 export class ApiError extends Error {
   // Written out rather than declared as constructor parameters: parameter
   // properties are erasable-syntax-only violations, and this repo enforces
@@ -181,7 +244,8 @@ export class BoardClient {
       }
 
       if (!response.ok) {
-        const error = (parsed as { error?: { message?: string; code?: string; fields?: [] } })?.error;
+        const error = (parsed as { error?: { message?: string; code?: string; fields?: [] } })
+          ?.error;
         throw new ApiError(
           error?.message ?? `${this.server} answered ${response.status}.`,
           response.status,
@@ -332,7 +396,13 @@ export class BoardClient {
   // --- updates ----------------------------------------------------------
 
   async updates(scope: { org?: string; candidate?: string; following?: boolean } = {}): Promise<{
-    items: { id: string; body: string; link: string | null; createdAt: string; author: { kind: string; name: string; slug: string | null } }[];
+    items: {
+      id: string;
+      body: string;
+      link: string | null;
+      createdAt: string;
+      author: { kind: string; name: string; slug: string | null };
+    }[];
   }> {
     const params = new URLSearchParams();
     if (scope.org !== undefined && scope.org !== '') params.set('org', scope.org);
@@ -360,6 +430,90 @@ export class BoardClient {
         ? `/api/v1/orgs/${encodeURIComponent(target.org)}/follow`
         : `/api/v1/candidates/${encodeURIComponent(target.candidate ?? '')}/follow`;
     return this.request(following ? 'POST' : 'DELETE', path);
+  }
+
+  // --- agents ---------------------------------------------------------------
+
+  async agents(
+    options: { skill?: string; limit?: number } = {},
+  ): Promise<{ items: AgentRecord[]; total: number }> {
+    const params = new URLSearchParams();
+    if (options.skill) params.set('skill', options.skill);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const search = params.toString();
+    return this.request('GET', `/api/v1/agents${search === '' ? '' : `?${search}`}`);
+  }
+
+  async myAgents(): Promise<{ items: AgentRecord[]; total: number }> {
+    return this.request('GET', '/api/v1/me/agents');
+  }
+
+  async agent(slug: string): Promise<{ agent: AgentRecord }> {
+    return this.request('GET', `/api/v1/agents/${encodeURIComponent(slug)}`);
+  }
+
+  async registerAgent(input: AgentInputRecord): Promise<{ agent: AgentRecord; url: string }> {
+    return this.request('POST', '/api/v1/agents', input);
+  }
+
+  async updateAgent(slug: string, input: AgentInputRecord): Promise<{ agent: AgentRecord }> {
+    return this.request('PATCH', `/api/v1/agents/${encodeURIComponent(slug)}`, input);
+  }
+
+  /** Name `slug` as the operator of `agents`. */
+  async setOperator(slug: string, agents: string[]): Promise<{ agent: AgentRecord }> {
+    return this.request('POST', `/api/v1/agents/${encodeURIComponent(slug)}/operates`, { agents });
+  }
+
+  async deleteAgent(slug: string): Promise<{ deleted: boolean }> {
+    return this.request('DELETE', `/api/v1/agents/${encodeURIComponent(slug)}`);
+  }
+
+  // --- watches and notifications -------------------------------------------
+
+  async watches(): Promise<{ items: WatchRecord[]; total: number }> {
+    return this.request('GET', '/api/v1/watches');
+  }
+
+  async watch(
+    query: Partial<JobQuery>,
+    options: { email?: boolean } = {},
+  ): Promise<{ watch: WatchRecord; created: boolean }> {
+    return this.request('POST', '/api/v1/watches', {
+      ...query,
+      ...(options.email === undefined ? {} : { email: options.email }),
+    });
+  }
+
+  async unwatch(id: string): Promise<{ deleted: boolean }> {
+    return this.request('DELETE', `/api/v1/watches/${encodeURIComponent(id)}`);
+  }
+
+  async notifications(
+    options: { unreadOnly?: boolean; limit?: number } = {},
+  ): Promise<{ items: NotificationRecord[]; unread: number }> {
+    const params = new URLSearchParams();
+    if (options.unreadOnly) params.set('unread', 'true');
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const search = params.toString();
+    return this.request('GET', `/api/v1/notifications${search === '' ? '' : `?${search}`}`);
+  }
+
+  async markNotificationsRead(id?: string): Promise<{ read: number }> {
+    return this.request('POST', '/api/v1/notifications/read', id === undefined ? {} : { id });
+  }
+
+  // --- rankings ---------------------------------------------------------------
+
+  async rankings(
+    options: { board?: string; period?: string; limit?: number } = {},
+  ): Promise<RankingsRecord> {
+    const params = new URLSearchParams();
+    if (options.board) params.set('board', options.board);
+    if (options.period) params.set('period', options.period);
+    if (options.limit !== undefined) params.set('limit', String(options.limit));
+    const search = params.toString();
+    return this.request('GET', `/api/v1/rankings${search === '' ? '' : `?${search}`}`);
   }
 
   // --- inbox and billing --------------------------------------------------
@@ -455,7 +609,10 @@ export class BoardClient {
 
   // --- recommendations --------------------------------------------------
 
-  async recommendations(subject: { candidate?: string; org?: string }): Promise<{ items: RecommendationLike[]; total: number }> {
+  async recommendations(subject: {
+    candidate?: string;
+    org?: string;
+  }): Promise<{ items: RecommendationLike[]; total: number }> {
     const path =
       subject.candidate !== undefined && subject.candidate !== ''
         ? `/api/v1/candidates/${encodeURIComponent(subject.candidate)}/recommendations`
@@ -474,7 +631,11 @@ export class BoardClient {
     return this.request('POST', path, input);
   }
 
-  async myRecommendations(): Promise<{ received: RecommendationLike[]; given: RecommendationLike[]; pending: number }> {
+  async myRecommendations(): Promise<{
+    received: RecommendationLike[];
+    given: RecommendationLike[];
+    pending: number;
+  }> {
     return this.request('GET', '/api/v1/me/recommendations');
   }
 

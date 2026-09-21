@@ -34,6 +34,10 @@ const BOOLEAN_FLAGS = new Set([
   'publish',
   'following',
   'candidate',
+  'private',
+  'no-email',
+  'unread',
+  'read',
 ]);
 
 function takesValue(name: string, next: string | undefined): next is string {

@@ -225,7 +225,10 @@ export function toJob(row: JobRow): Job {
 }
 
 /** Builds the where clause shared by search and count, so they cannot drift. */
-function conditions(query: JobQuery, includeUnpublished: boolean): {
+function conditions(
+  query: JobQuery,
+  includeUnpublished: boolean,
+): {
   sql: string;
   params: unknown[];
 } {
@@ -316,6 +319,58 @@ export async function searchJobs(
     limit: query.limit,
     offset: query.offset,
   };
+}
+
+/**
+ * Does one published listing satisfy a query?
+ *
+ * Built on the same where clause as the search, so a watch matches exactly
+ * the listings the person would have seen had they run the search themselves.
+ * A second matcher written in JavaScript would drift from the SQL one on the
+ * first full-text edge case, and a watch that fires on a listing the search
+ * does not show is a watch nobody trusts.
+ */
+export async function jobMatchesQuery(
+  pool: pg.Pool,
+  jobId: string,
+  query: JobQuery,
+): Promise<boolean> {
+  const { sql: whereSql, params } = conditions(query, false);
+  params.push(jobId);
+  const result = await pool.query(
+    `select 1 from jobs j join organisations o on o.id = j.org_id
+      ${whereSql === '' ? 'where' : `${whereSql} and`} j.id = $${params.length} limit 1`,
+    params,
+  );
+  return result.rows.length > 0;
+}
+
+/** The published listings whose stated pay has an annual figure, in cents. */
+export async function annualPayCents(
+  pool: pg.Pool,
+): Promise<{ slug: string; title: string; org: string; cents: number; publishedAt: string }[]> {
+  const rows = await pool.query<{
+    slug: string;
+    title: string;
+    org: string;
+    cents: string;
+    published_at: string;
+  }>(
+    `select j.slug, j.title, o.name as org, (${ANNUAL_TOP_SALARY})::bigint * 100 as cents, j.published_at
+       from jobs j join organisations o on o.id = j.org_id
+      where j.status = 'published' and j.published_at is not null and j.published_at <= now()
+        and (j.expires_at is null or j.expires_at > now())
+        and (${ANNUAL_TOP_SALARY}) is not null
+        and upper(coalesce(j.salary_currency, 'USD')) = 'USD'
+      order by cents desc limit 500`,
+  );
+  return rows.rows.map((row) => ({
+    slug: row.slug,
+    title: row.title,
+    org: row.org,
+    cents: Number(row.cents),
+    publishedAt: row.published_at,
+  }));
 }
 
 export async function getJobBySlug(
@@ -456,9 +511,7 @@ export function normaliseApplySchema(input: unknown): ApplySchema | null {
         ? (type as (typeof FIELD_TYPES)[number])
         : 'text',
       required: field['required'] === true,
-      ...(Array.isArray(field['options'])
-        ? { options: parseList(field['options'], 30, 80) }
-        : {}),
+      ...(Array.isArray(field['options']) ? { options: parseList(field['options'], 30, 80) } : {}),
       ...(clean(field['help'], 200) ? { help: clean(field['help'], 200) } : {}),
       maxLength: Math.min(20_000, Math.max(1, Number(field['maxLength']) || 2000)),
     });
@@ -494,11 +547,7 @@ function date(value: unknown): string | null {
 }
 
 function lines(value: unknown, max: number): string[] {
-  const raw = Array.isArray(value)
-    ? value
-    : typeof value === 'string'
-      ? value.split(/\r?\n/)
-      : [];
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/\r?\n/) : [];
   return raw
     .map((line) => clean(line, 300).replace(/^[-*]\s*/, ''))
     .filter((line) => line !== '')
@@ -572,11 +621,7 @@ export async function createJob(pool: pg.Pool, input: JobInput): Promise<Job> {
   return job;
 }
 
-export async function setStatus(
-  pool: pg.Pool,
-  id: string,
-  status: JobStatus,
-): Promise<Job | null> {
+export async function setStatus(pool: pg.Pool, id: string, status: JobStatus): Promise<Job | null> {
   await pool.query(
     `update jobs
         set status = $2,

@@ -13,7 +13,11 @@ import { toPlainText } from '../markup/markdown.ts';
 import {
   keyHints,
   selectedIndex,
+  TABS,
+  tabLabel,
+  type AgentRow,
   type Job,
+  type ThreadDetail,
   type TuiState,
 } from './types.ts';
 
@@ -31,13 +35,8 @@ export function render(ui: Container, theme: Theme, state: TuiState): void {
   });
 
   ui.tabs({
-    tabs: [
-      'Find work',
-      `Drafts${state.drafts.length === 0 ? '' : ` (${state.drafts.length})`}`,
-      'Your listings',
-      'Boards',
-    ],
-    active: ['find', 'drafts', 'listings', 'boards'].indexOf(state.tab),
+    tabs: TABS.map((tab) => tabLabel(state, tab)),
+    active: TABS.indexOf(state.tab),
     variant: 'underline',
   });
 
@@ -49,10 +48,17 @@ export function render(ui: Container, theme: Theme, state: TuiState): void {
 
   if (state.detail !== null) {
     jobDetail(ui, theme, state.detail);
+  } else if (state.thread !== null) {
+    threadDetail(ui, theme, state.thread);
+  } else if (state.agent !== null) {
+    agentDetail(ui, theme, state.agent);
   } else {
     switch (state.tab) {
       case 'find':
         findTab(ui, theme, state);
+        break;
+      case 'inbox':
+        inboxTab(ui, theme, state);
         break;
       case 'drafts':
         draftsTab(ui, theme, state);
@@ -60,13 +66,140 @@ export function render(ui: Container, theme: Theme, state: TuiState): void {
       case 'listings':
         listingsTab(ui, theme, state);
         break;
+      case 'agents':
+        agentsTab(ui, theme, state);
+        break;
       case 'boards':
         boardsTab(ui, theme, state);
         break;
     }
   }
 
+  if (state.prompt !== null) {
+    ui.panel({ title: state.prompt.label }, (panel) => {
+      panel.text(`${state.prompt?.value ?? ''}_`);
+    });
+  }
+
   ui.statusBar({ items: keyHints(state).map((hint) => ({ key: hint.key, label: hint.label })) });
+}
+
+function inboxTab(ui: Container, theme: Theme, state: TuiState): void {
+  if (!state.signedIn) {
+    ui.panel({ title: 'Inbox' }, (panel) => {
+      panel.label('Sign in to read your conversations: agenticjobs login');
+    });
+    return;
+  }
+  if (state.threads.length === 0) {
+    ui.panel({ title: 'Inbox' }, (panel) => {
+      panel.label('Nothing here yet.');
+      panel.label('People reach you through the inbox; there is no public commenting.');
+      panel.label('Start one: agenticjobs message <employer-slug> <text>');
+    });
+    return;
+  }
+  ui.panel(
+    {
+      title: `Inbox (${state.threads.length}${state.unread === 0 ? '' : `, ${state.unread} unread`})`,
+      size: fill,
+    },
+    (panel) => {
+      panel.list({
+        items: state.threads.map((thread) => ({
+          label: `${thread.unread > 0 ? `[${thread.unread} new] ` : ''}${thread.with.name}  -  ${thread.subject}  ${ago(thread.lastMessageAt)}`,
+          color: thread.unread > 0 ? theme.accent : undefined,
+        })),
+        selected: state.threadIndex,
+        followSelection: true,
+        scrollbar: true,
+      });
+    },
+  );
+}
+
+function threadDetail(ui: Container, theme: Theme, thread: ThreadDetail): void {
+  ui.heading(thread.subject === '' ? `With ${thread.with.name}` : thread.subject);
+  ui.label(
+    `with ${thread.with.name}${thread.with.slug === null ? '' : ` (${thread.with.kind} ${thread.with.slug})`}`,
+  );
+  ui.panel({ title: `Messages (${thread.messages.length})`, size: fill }, (panel) => {
+    const lines = thread.messages.map(
+      (message) =>
+        `${message.mine ? 'You' : message.sender.name}  ${ago(message.createdAt)}${message.kind === 'invoice' ? '  (invoice)' : ''}\n${message.body}`,
+    );
+    panel.text(lines.join('\n\n'), { wrap: true });
+  });
+  if (thread.invoices.length > 0) {
+    ui.keyValues(
+      thread.invoices.map((invoice) => ({
+        label: `Invoice ${invoice.id.slice(0, 8)}`,
+        value: `$${invoice.amountUsd} ${invoice.currency}  ${invoice.status}`,
+        color: invoice.status === 'paid' ? theme.success : theme.warning,
+      })),
+    );
+  }
+}
+
+function agentsTab(ui: Container, theme: Theme, state: TuiState): void {
+  if (!state.signedIn) {
+    ui.panel({ title: 'Your agents' }, (panel) => {
+      panel.label('Sign in to register the agents you operate: agenticjobs login');
+    });
+    return;
+  }
+  ui.panel({ title: 'The agents you operate' }, (panel) => {
+    panel.label('You are their sysop. Each one says what it is good at; that list is required.');
+  });
+  if (state.agents.length === 0) {
+    ui.panel({ title: 'Your agents' }, (panel) => {
+      panel.label('None registered. Press n to register one.');
+    });
+    return;
+  }
+  ui.panel({ title: `Your agents (${state.agents.length})`, size: fill }, (panel) => {
+    panel.list({
+      items: state.agents.map((agent) => ({
+        label: `${agent.name}  -  ${agent.skills.join(', ')}${agent.operator === null ? '' : `  (via ${agent.operator.name})`}${
+          agent.operates.length > 0 ? `  operates ${agent.operates.length}` : ''
+        }${agent.public ? '' : '  private'}`,
+        color: agent.public ? undefined : theme.muted,
+      })),
+      selected: state.agentIndex,
+      followSelection: true,
+      scrollbar: true,
+    });
+  });
+}
+
+function agentDetail(ui: Container, theme: Theme, agent: AgentRow): void {
+  ui.heading(agent.name);
+  ui.label(agent.slug);
+  ui.keyValues([
+    { label: 'Skills', value: agent.skills.join(', ') },
+    {
+      label: 'Operated by',
+      value: agent.operator === null ? 'you, directly' : agent.operator.name,
+    },
+    {
+      label: 'Operates',
+      value: agent.operates.length === 0 ? '-' : agent.operates.map((a) => a.name).join(', '),
+    },
+    {
+      label: 'Listed',
+      value: agent.public ? 'public directory' : 'private',
+      color: agent.public ? theme.success : theme.muted,
+    },
+    { label: 'Lives at', value: agent.url ?? '-' },
+  ]);
+  ui.panel({ title: 'What it does', size: fill }, (panel) => {
+    panel.text(
+      agent.description === ''
+        ? 'Nothing written yet. agenticjobs agents update ' + agent.slug + ' --description "..."'
+        : toPlainText(agent.description, 4000),
+      { wrap: true },
+    );
+  });
 }
 
 function findTab(ui: Container, theme: Theme, state: TuiState): void {
@@ -110,26 +243,29 @@ function jobDetail(ui: Container, theme: Theme, job: Job): void {
   ui.label(`${job.org.name}${job.location === null ? '' : ` - ${job.location}`}`);
 
   ui.keyValues([
-      { label: 'Where', value: `${job.workplace}${job.location === null ? '' : `, ${job.location}`}` },
-      { label: 'Type', value: job.employmentType },
-      { label: 'Level', value: job.seniority ?? 'unspecified' },
-      {
-        label: 'Pay',
-        value: [formatPay(payOfJob(job)) ?? 'not listed', formatMethod(payOfJob(job).method)]
-          .filter((bit): bit is string => bit !== null)
-          .join(', '),
-      },
-      {
-        label: 'Agents',
-        value: agentPolicyText(job.agentPolicy),
-        color:
-          job.agentPolicy === 'welcome'
-            ? theme.success
-            : job.agentPolicy === 'human-only'
-              ? theme.muted
-              : theme.warning,
-      },
-      { label: 'Stack', value: job.stack.join(', ') || '-' },
+    {
+      label: 'Where',
+      value: `${job.workplace}${job.location === null ? '' : `, ${job.location}`}`,
+    },
+    { label: 'Type', value: job.employmentType },
+    { label: 'Level', value: job.seniority ?? 'unspecified' },
+    {
+      label: 'Pay',
+      value: [formatPay(payOfJob(job)) ?? 'not listed', formatMethod(payOfJob(job).method)]
+        .filter((bit): bit is string => bit !== null)
+        .join(', '),
+    },
+    {
+      label: 'Agents',
+      value: agentPolicyText(job.agentPolicy),
+      color:
+        job.agentPolicy === 'welcome'
+          ? theme.success
+          : job.agentPolicy === 'human-only'
+            ? theme.muted
+            : theme.warning,
+    },
+    { label: 'Stack', value: job.stack.join(', ') || '-' },
     { label: 'Apply', value: job.apply.via },
   ]);
 

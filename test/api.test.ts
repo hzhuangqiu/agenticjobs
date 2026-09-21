@@ -19,8 +19,9 @@ const DATABASE_URL =
   'postgres://agenticjobs:agenticjobs@localhost:5432/agenticjobs';
 
 let app: Hono<never> | null = null;
-let pool: { query: (sql: string, params?: unknown[]) => Promise<{ rows: Record<string, string>[] }> } | null =
-  null;
+let pool: {
+  query: (sql: string, params?: unknown[]) => Promise<{ rows: Record<string, string>[] }>;
+} | null = null;
 let closePool: (() => Promise<void>) | null = null;
 let reason = '';
 
@@ -141,7 +142,9 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
     const source = readFileSync(new URL('../src/server/routes/api.ts', import.meta.url), 'utf8');
 
     const served = new Set();
-    for (const [, method, path] of source.matchAll(/api\.(get|post|patch|put|delete)\('([^']+)'/g)) {
+    for (const [, method, path] of source.matchAll(
+      /api\.(get|post|patch|put|delete)\('([^']+)'/g,
+    )) {
       const openapiPath = path.replace(/:(\w+)\{[^}]*\}/g, '{$1}').replace(/:(\w+)/g, '{$1}');
       served.add(method.toUpperCase() + ' /api/v1' + openapiPath);
     }
@@ -163,15 +166,18 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
     // A path in the document that 404s is a lie told to whoever reads it, and
     // a route with no entry is invisible. This catches the first.
-    const slug = ((await (await get('/api/v1/jobs?limit=1')).json()) as {
-      items: { slug: string }[];
-    }).items[0]?.slug;
+    const slug = (
+      (await (await get('/api/v1/jobs?limit=1')).json()) as {
+        items: { slug: string }[];
+      }
+    ).items[0]?.slug;
     assert.ok(slug, 'the seed produced no jobs to test paths against');
 
     // `{slug}` means a different kind of slug on different paths, so the
     // substitution has to know which. Feeding a job slug to /orgs/{slug} would
     // report a documented route as broken when it is the test that is wrong.
-    const orgs = ((await (await get('/api/v1/orgs')).json()) as { items: { slug: string }[] }).items;
+    const orgs = ((await (await get('/api/v1/orgs')).json()) as { items: { slug: string }[] })
+      .items;
     const orgSlug = orgs[0]?.slug ?? 'example-works';
 
     // A candidate slug is a third kind again, and there may be none: a board
@@ -182,15 +188,24 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
     ).items;
     const candidateSlug = candidates[0]?.slug ?? null;
 
+    // An agent slug is a fourth kind, and a board with no agents registered
+    // is a normal board too.
+    const agents = ((await (await get('/api/v1/agents')).json()) as { items: { slug: string }[] })
+      .items;
+    const agentSlug = agents[0]?.slug ?? null;
+
     const checked: string[] = [];
     for (const [path, methods] of Object.entries(document.paths)) {
       if (!Object.hasOwn(methods, 'get')) continue;
       if (path.startsWith('/api/v1/candidates/') && candidateSlug === null) continue;
+      if (path.startsWith('/api/v1/agents/{') && agentSlug === null) continue;
       const slugFor = path.startsWith('/api/v1/orgs')
         ? orgSlug
         : path.startsWith('/api/v1/candidates')
           ? (candidateSlug as string)
-          : slug;
+          : path.startsWith('/api/v1/agents')
+            ? (agentSlug as string)
+            : slug;
       const concrete = path.replace('{slug}', slugFor).replace('{id}', 'x');
       const response = await get(concrete);
       // 401 is a pass: the route exists and asked for a credential.
@@ -201,7 +216,12 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
   });
 
   test('reads need no credentials', async () => {
-    for (const path of ['/api/v1/jobs', '/api/v1/orgs', '/api/v1/stats', '/.well-known/agenticjobs']) {
+    for (const path of [
+      '/api/v1/jobs',
+      '/api/v1/orgs',
+      '/api/v1/stats',
+      '/.well-known/agenticjobs',
+    ]) {
       assert.equal((await get(path)).status, 200, path);
     }
   });
@@ -440,9 +460,7 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       // has to skip, so it is refused at the door rather than stored.
       if (pool === null) return;
       const { createSession } = await import('../dist/core/auth.js');
-      const owner = await pool.query(
-        `select user_id from memberships limit 1`,
-      );
+      const owner = await pool.query(`select user_id from memberships limit 1`);
       const userId = owner.rows[0]?.['user_id'];
       assert.ok(userId, 'expected the seed to leave an employer member');
       const token = await createSession(pool as never, userId, { label: 'test' });
@@ -474,9 +492,11 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       };
       assert.ok(page.items.length > 0, 'expected the seeded board to have jobs');
       for (const item of page.items) {
-        const schema = (await (
-          await get(`/api/v1/jobs/${item.slug}/apply-schema`)
-        ).json()) as { via: string; endpoint?: string; schema?: { fields: unknown[] } };
+        const schema = (await (await get(`/api/v1/jobs/${item.slug}/apply-schema`)).json()) as {
+          via: string;
+          endpoint?: string;
+          schema?: { fields: unknown[] };
+        };
         assert.equal(schema.via, 'board', item.slug);
         assert.ok(schema.endpoint, `${item.slug} must publish an endpoint`);
         assert.ok((schema.schema?.fields ?? []).length > 0, `${item.slug} must publish fields`);
@@ -526,7 +546,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         org: { website: string | null; description: string | null };
       };
       assert.equal(kept.org.description, 'We make examples.');
-      assert.ok(kept.org.website?.includes('example.com'), 'the website survived a patch about something else');
+      assert.ok(
+        kept.org.website?.includes('example.com'),
+        'the website survived a patch about something else',
+      );
 
       // An explicit null is the way to actually clear one.
       await patch(`/api/v1/orgs/${org.slug}`, { website: null }, auth);
@@ -541,7 +564,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const { org } = await employer('Mine Co');
       const stranger = await employer('Stranger Co');
 
-      assert.equal((await patch(`/api/v1/orgs/${org.slug}`, { name: 'Theirs' }, stranger.auth)).status, 403);
+      assert.equal(
+        (await patch(`/api/v1/orgs/${org.slug}`, { name: 'Theirs' }, stranger.auth)).status,
+        403,
+      );
       assert.equal((await del(`/api/v1/orgs/${org.slug}`, stranger.auth)).status, 403);
       // And with no token at all, which is a different code path.
       assert.equal((await patch(`/api/v1/orgs/${org.slug}`, { name: 'Theirs' })).status, 401);
@@ -742,7 +768,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       );
       const directBody = await direct.text();
       assert.equal(direct.status, 400, directBody);
-      assert.equal((JSON.parse(directBody) as { error: { code: string } }).error.code, 'pay_required');
+      assert.equal(
+        (JSON.parse(directBody) as { error: { code: string } }).error.code,
+        'pay_required',
+      );
 
       const created = (await (
         await post(
@@ -777,7 +806,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
       const read = (await (await get(`/api/v1/jobs/${created.job.slug}`)).json()) as {
         job: {
-          pay: { lines: { type: string; min: number; unit: string | null }[]; method: string | null };
+          pay: {
+            lines: { type: string; min: number; unit: string | null }[];
+            method: string | null;
+          };
           salary: { min: number | null };
         };
       };
@@ -797,7 +829,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       // And a live listing cannot be edited into silence.
       const cleared = await patch(`/api/v1/jobs/${created.job.slug}`, { pay: [] }, auth);
       assert.equal(cleared.status, 400);
-      assert.equal(((await cleared.json()) as { error: { code: string } }).error.code, 'pay_required');
+      assert.equal(
+        ((await cleared.json()) as { error: { code: string } }).error.code,
+        'pay_required',
+      );
     });
 
     test('an edit that does not mention pay leaves it alone', async () => {
@@ -820,8 +855,14 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       assert.equal(created.job.pay.method, 'USDC', 'a rail named on the line is the method');
 
       const edited = (await (
-        await patch(`/api/v1/jobs/${created.job.slug}`, { description: 'Fixed the typo in the description.' }, auth)
-      ).json()) as { job: { pay: { lines: unknown[]; method: string | null }; salary: { min: number | null } } };
+        await patch(
+          `/api/v1/jobs/${created.job.slug}`,
+          { description: 'Fixed the typo in the description.' },
+          auth,
+        )
+      ).json()) as {
+        job: { pay: { lines: unknown[]; method: string | null }; salary: { min: number | null } };
+      };
       assert.equal(edited.job.pay.lines.length, 1);
       assert.equal(edited.job.pay.method, 'USDC');
       assert.equal(edited.job.salary.min, 120_000, 'the flattened salary keeps the annual line');
@@ -833,14 +874,23 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const created = (await (
         await post(
           '/api/v1/jobs',
-          { org: org.slug, title: `Blank ${stamp}`, description: 'No pay stated, on purpose, for the test.', agentPolicy: 'welcome' },
+          {
+            org: org.slug,
+            title: `Blank ${stamp}`,
+            description: 'No pay stated, on purpose, for the test.',
+            agentPolicy: 'welcome',
+          },
           auth,
         )
       ).json()) as { job: { slug: string } };
       // Drafts are not public, so the employer's own page is where it shows.
       const { createSession } = await import('../dist/core/auth.js');
-      const member = await pool.query(`select user_id from memberships where org_id = $1`, [org.id]);
-      const cookieToken = await createSession(pool as never, member.rows[0]?.['user_id'], { label: 'web' });
+      const member = await pool.query(`select user_id from memberships where org_id = $1`, [
+        org.id,
+      ]);
+      const cookieToken = await createSession(pool as never, member.rows[0]?.['user_id'], {
+        label: 'web',
+      });
       const page = await get(`/me/jobs/${created.job.slug}`, {
         accept: 'text/html',
         cookie: `aj_session=${cookieToken}`,
@@ -1228,10 +1278,16 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       if (pool === null) return;
       const dup = await employer('Dcme');
       const body = `Exactly the same thing, ${Date.now()}.`;
-      assert.equal((await post('/api/v1/updates', { org: dup.org.slug, body }, dup.auth)).status, 201);
+      assert.equal(
+        (await post('/api/v1/updates', { org: dup.org.slug, body }, dup.auth)).status,
+        201,
+      );
       const again = await post('/api/v1/updates', { org: dup.org.slug, body }, dup.auth);
       assert.equal(again.status, 400);
-      assert.match(((await again.json()) as { error: { message: string } }).error.message, /already posted/);
+      assert.match(
+        ((await again.json()) as { error: { message: string } }).error.message,
+        /already posted/,
+      );
     });
 
     test('five a day is the limit, and the sixth says so', async () => {
@@ -1281,7 +1337,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         nobody.auth,
       );
       assert.equal(response.status, 403);
-      assert.equal(((await response.json()) as { error: { code: string } }).error.code, 'no_profile');
+      assert.equal(
+        ((await response.json()) as { error: { code: string } }).error.code,
+        'no_profile',
+      );
     });
 
     test('following is idempotent, and unfollowing undoes it', async () => {
@@ -1333,7 +1392,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const after = (await (await get('/api/v1/updates?following=true', reader.auth)).json()) as {
         items: { body: string }[];
       };
-      assert.ok(after.items.some((item) => item.body === body), 'a followed update must appear');
+      assert.ok(
+        after.items.some((item) => item.body === body),
+        'a followed update must appear',
+      );
     });
 
     test('you can take your own update down, and only your own', async () => {
@@ -1375,7 +1437,7 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
   describe('inbox and invoices', () => {
     /** Read a body once: asserting on text() and then calling json() is how a test reads a body twice. */
-    const asJson = async <T,>(response: Response, status: number): Promise<T> => {
+    const asJson = async <T>(response: Response, status: number): Promise<T> => {
       const text = await response.text();
       assert.equal(response.status, status, text);
       return JSON.parse(text) as T;
@@ -1384,7 +1446,12 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const { createSession, ensureUser } = await import('../dist/core/auth.js');
       const user = await ensureUser(pool as never, `inbox+${Date.now()}+${name}@example.com`, name);
       const token = await createSession(pool as never, user.id, { label: 't' });
-      return { user, token, auth: { authorization: `Bearer ${token}` }, cookie: { cookie: `aj_session=${token}` } };
+      return {
+        user,
+        token,
+        auth: { authorization: `Bearer ${token}` },
+        cookie: { cookie: `aj_session=${token}` },
+      };
     };
     const employer = async (name: string) => {
       const { createOrg } = await import('../dist/core/orgs.js');
@@ -1394,7 +1461,8 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       return { ...who, org };
     };
     const candidate = async (name: string) => {
-      const { createResume, updateResume, ensurePublicSlug } = await import('../dist/core/resumes.js');
+      const { createResume, updateResume, ensurePublicSlug } =
+        await import('../dist/core/resumes.js');
       const who = await person(name);
       const created = await createResume(pool as never, who.user.id, {
         markdown: `# ${name}\n\nEngineer\n\n- Email: ${name.toLowerCase()}@example.com\n\n## Skills\n\n- Go\n`,
@@ -1417,7 +1485,12 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
       const first = await post(
         '/api/v1/inbox',
-        { candidate: grace.slug, as: acme.org.slug, subject: 'The Go role', body: 'Are you open to contract work?' },
+        {
+          candidate: grace.slug,
+          as: acme.org.slug,
+          subject: 'The Go role',
+          body: 'Are you open to contract work?',
+        },
         acme.auth,
       );
       const started = await asJson<{ threadId: string; created: boolean; url: string }>(first, 201);
@@ -1452,12 +1525,21 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
       // A stranger cannot see it exists.
       assert.equal((await get(`/api/v1/inbox/${started.threadId}`, stranger.auth)).status, 404);
-      assert.equal((await post(`/api/v1/inbox/${started.threadId}/messages`, { body: 'hi' }, stranger.auth)).status, 404);
+      assert.equal(
+        (await post(`/api/v1/inbox/${started.threadId}/messages`, { body: 'hi' }, stranger.auth))
+          .status,
+        404,
+      );
       assert.equal((await get('/api/v1/inbox')).status, 401, 'anonymous has no inbox');
 
       // Reading marks it read; replying reaches the employer.
-      const thread = (await (await get(`/api/v1/inbox/${started.threadId}`, grace.auth)).json()) as {
-        thread: { messages: { body: string; mine: boolean; sender: { party: { kind: string } | null } }[]; with: { name: string } };
+      const thread = (await (
+        await get(`/api/v1/inbox/${started.threadId}`, grace.auth)
+      ).json()) as {
+        thread: {
+          messages: { body: string; mine: boolean; sender: { party: { kind: string } | null } }[];
+          with: { name: string };
+        };
       };
       assert.equal(thread.thread.messages.length, 2);
       assert.equal(thread.thread.messages[0]?.mine, false);
@@ -1466,7 +1548,11 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       assert.equal(after.unread, 0);
 
       sentMail.length = 0;
-      const reply = await post(`/api/v1/inbox/${started.threadId}/messages`, { body: 'Yes, from March.' }, grace.auth);
+      const reply = await post(
+        `/api/v1/inbox/${started.threadId}/messages`,
+        { body: 'Yes, from March.' },
+        grace.auth,
+      );
       assert.equal(reply.status, 201);
       const theirs = (await (await get('/api/v1/inbox', acme.auth)).json()) as {
         items: { unread: number; with: { kind: string; name: string }; preview: string }[];
@@ -1475,7 +1561,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       assert.equal(theirs.items[0]?.with.kind, 'candidate');
       assert.equal(theirs.items[0]?.with.name, 'Grace Hopper');
       assert.equal(theirs.items[0]?.preview, 'Yes, from March.');
-      assert.ok(sentMail.some((mail) => mail.to === acme.user.email), 'the employer is emailed back');
+      assert.ok(
+        sentMail.some((mail) => mail.to === acme.user.email),
+        'the employer is emailed back',
+      );
 
       // The pages: a signed-out reader is sent to sign in; a member reads it.
       const page = await (await get(`/candidates/${grace.slug}`, { accept: 'text/html' })).text();
@@ -1484,21 +1573,42 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const inbox = await (await get('/inbox', { accept: 'text/html', ...acme.cookie })).text();
       assert.ok(inbox.includes('The Go role'), 'the inbox page lists the thread');
       assert.ok(inbox.includes('Grace Hopper'));
-      const open = await (await get(`/inbox/${started.threadId}`, { accept: 'text/html', ...acme.cookie })).text();
+      const open = await (
+        await get(`/inbox/${started.threadId}`, { accept: 'text/html', ...acme.cookie })
+      ).text();
       assert.ok(open.includes('Yes, from March.'));
       assert.ok(!open.includes('Send an invoice'), 'no invoice form on a board without billing');
-      assert.equal((await get(`/inbox/${started.threadId}`, { accept: 'text/html', ...stranger.cookie })).status, 404);
+      assert.equal(
+        (await get(`/inbox/${started.threadId}`, { accept: 'text/html', ...stranger.cookie }))
+          .status,
+        404,
+      );
     });
 
     test('writing to yourself, to nobody, or too often is refused in words', async () => {
       if (pool === null) return;
       const grace = await candidate('Grace Self');
-      const self = await post('/api/v1/inbox', { candidate: grace.slug, body: 'Hello me.' }, grace.auth);
+      const self = await post(
+        '/api/v1/inbox',
+        { candidate: grace.slug, body: 'Hello me.' },
+        grace.auth,
+      );
       assert.equal(self.status, 400);
-      assert.match(((await self.json()) as { error: { message: string } }).error.message, /That is you/);
-      assert.equal((await post('/api/v1/inbox', { candidate: 'no-such-person', body: 'Hello?' }, grace.auth)).status, 404);
+      assert.match(
+        ((await self.json()) as { error: { message: string } }).error.message,
+        /That is you/,
+      );
+      assert.equal(
+        (await post('/api/v1/inbox', { candidate: 'no-such-person', body: 'Hello?' }, grace.auth))
+          .status,
+        404,
+      );
       assert.equal((await post('/api/v1/inbox', { body: 'To whom?' }, grace.auth)).status, 404);
-      const empty = await post('/api/v1/inbox', { candidate: grace.slug, body: '   ' }, (await person('Quiet')).auth);
+      const empty = await post(
+        '/api/v1/inbox',
+        { candidate: grace.slug, body: '   ' },
+        (await person('Quiet')).auth,
+      );
       assert.equal(empty.status, 400);
     });
 
@@ -1513,7 +1623,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         impostor.auth,
       );
       assert.equal(response.status, 400);
-      assert.match(((await response.json()) as { error: { message: string } }).error.message, /employer you belong to/);
+      assert.match(
+        ((await response.json()) as { error: { message: string } }).error.message,
+        /employer you belong to/,
+      );
     });
 
     describe('billing', () => {
@@ -1530,7 +1643,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const fetchStub: typeof fetch = async (input, init) => {
         const url = new URL(String(input));
         const json = (body: unknown, status = 200) =>
-          new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          });
         if (url.pathname === '/api/oauth/token') {
           const form = new URLSearchParams(String(init?.body ?? ''));
           if (form.get('client_id') !== 'cp_board' || form.get('client_secret') !== 'cps_board') {
@@ -1539,7 +1655,13 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
           if (form.get('grant_type') === 'authorization_code' && form.get('code') !== 'good-code') {
             return json({ error: 'invalid_grant' }, 400);
           }
-          return json({ access_token: `at_${Date.now()}`, refresh_token: 'rt', token_type: 'Bearer', expires_in: 3600, scope: scopeToGrant });
+          return json({
+            access_token: `at_${Date.now()}`,
+            refresh_token: 'rt',
+            token_type: 'Bearer',
+            expires_in: 3600,
+            scope: scopeToGrant,
+          });
         }
         if (url.pathname === '/api/oauth/userinfo') {
           const auth = new Headers(init?.headers).get('authorization') ?? '';
@@ -1549,13 +1671,19 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
             email: 'grace@coinpay.test',
             name: 'Grace',
             ...(scopeToGrant.includes('wallet:read')
-              ? { wallets: [{ address: '0xGRACE', chain: 'USDC_POL', label: 'Polygon' }, { address: 'bc1qgrace', chain: 'BTC' }] }
+              ? {
+                  wallets: [
+                    { address: '0xGRACE', chain: 'USDC_POL', label: 'Polygon' },
+                    { address: 'bc1qgrace', chain: 'BTC' },
+                  ],
+                }
               : {}),
           });
         }
         if (url.pathname === '/api/payments/create') {
           const auth = new Headers(init?.headers).get('authorization');
-          if (auth !== 'Bearer cp_live_board') return json({ success: false, error: 'Missing authorization header' }, 401);
+          if (auth !== 'Bearer cp_live_board')
+            return json({ success: false, error: 'Missing authorization header' }, 401);
           const sent = JSON.parse(String(init?.body)) as Record<string, unknown>;
           const id = `pay_${Date.now()}_${payments.size + 1}`;
           const payment = {
@@ -1574,7 +1702,9 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         const found = /^\/api\/payments\/(.+)$/.exec(url.pathname);
         if (found !== null) {
           const payment = payments.get(decodeURIComponent(found[1]!));
-          return payment === undefined ? json({ success: false, error: 'Payment not found' }, 404) : json({ success: true, payment });
+          return payment === undefined
+            ? json({ success: false, error: 'Payment not found' }, 404)
+            : json({ success: true, payment });
         }
         return json({ error: `unexpected ${url.pathname}` }, 500);
       };
@@ -1599,18 +1729,33 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         billed = createApp(
           pool as never,
           config,
-          { send: async (message) => { sentMail.push(message); return true; } },
+          {
+            send: async (message) => {
+              sentMail.push(message);
+              return true;
+            },
+          },
           createCoinPay(config.coinpay, fetchStub),
         ) as never;
       });
 
-      const send = async (method: string, path: string, body?: unknown, headers: Record<string, string> = {}) => {
+      const send = async (
+        method: string,
+        path: string,
+        body?: unknown,
+        headers: Record<string, string> = {},
+      ) => {
         if (billed === null) throw new Error('no billed app');
         return billed.fetch(
           new Request(`http://board.test${path}`, {
             method,
-            headers: { ...(body === undefined ? {} : { 'content-type': 'application/json' }), ...headers },
-            ...(body === undefined ? {} : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
+            headers: {
+              ...(body === undefined ? {} : { 'content-type': 'application/json' }),
+              ...headers,
+            },
+            ...(body === undefined
+              ? {}
+              : { body: typeof body === 'string' ? body : JSON.stringify(body) }),
             redirect: 'manual',
           }),
         );
@@ -1621,22 +1766,35 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         const away = await send('GET', '/me/coinpay/connect', undefined, who.cookie);
         assert.equal(away.status, 302);
         const authorize = new URL(away.headers.get('location') ?? '');
-        assert.equal(authorize.origin + authorize.pathname, 'https://coinpay.test/api/oauth/authorize');
+        assert.equal(
+          authorize.origin + authorize.pathname,
+          'https://coinpay.test/api/oauth/authorize',
+        );
         assert.equal(authorize.searchParams.get('client_id'), 'cp_board');
-        assert.equal(authorize.searchParams.get('redirect_uri'), 'http://board.test/api/v1/coinpay/callback');
+        assert.equal(
+          authorize.searchParams.get('redirect_uri'),
+          'http://board.test/api/v1/coinpay/callback',
+        );
         assert.ok(authorize.searchParams.get('scope')?.includes('wallet:read'));
         const state = authorize.searchParams.get('state') ?? '';
         // The callback is completed by the state, not by the cookie.
-        return send('GET', `/api/v1/coinpay/callback?code=good-code&state=${encodeURIComponent(state)}`);
+        return send(
+          'GET',
+          `/api/v1/coinpay/callback?code=good-code&state=${encodeURIComponent(state)}`,
+        );
       };
 
       test('the board without billing says so, and the one with it asks the person to connect', async () => {
         if (pool === null) return;
         const grace = await candidate('Grace Unbilled');
-        const off = (await (await get('/api/v1/coinpay', grace.auth)).json()) as { configured: boolean };
+        const off = (await (await get('/api/v1/coinpay', grace.auth)).json()) as {
+          configured: boolean;
+        };
         assert.equal(off.configured, false);
         const on = (await (await send('GET', '/api/v1/coinpay', undefined, grace.auth)).json()) as {
-          configured: boolean; account: unknown; connectUrl: string;
+          configured: boolean;
+          account: unknown;
+          connectUrl: string;
         };
         assert.equal(on.configured, true);
         assert.equal(on.account, null);
@@ -1654,40 +1812,93 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         assert.equal(back.status, 303);
         assert.equal(back.headers.get('location'), '/me?coinpay=connected#billing');
 
-        const state = (await (await send('GET', '/api/v1/coinpay', undefined, grace.auth)).json()) as {
-          account: { usable: boolean; wallets: { chain: string; address: string }[]; email: string };
+        const state = (await (
+          await send('GET', '/api/v1/coinpay', undefined, grace.auth)
+        ).json()) as {
+          account: {
+            usable: boolean;
+            wallets: { chain: string; address: string }[];
+            email: string;
+          };
         };
         assert.equal(state.account.usable, true);
         assert.equal(state.account.email, 'grace@coinpay.test');
-        assert.deepEqual(state.account.wallets.map((w) => w.chain), ['USDC_POL', 'BTC']);
+        assert.deepEqual(
+          state.account.wallets.map((w) => w.chain),
+          ['USDC_POL', 'BTC'],
+        );
 
         // The conversation, started by the employer.
-        const started = (await (await send('POST', '/api/v1/inbox', { candidate: grace.slug, as: acme.org.slug, body: 'Sprint 3 is done?' }, acme.auth)).json()) as { threadId: string };
+        const started = (await (
+          await send(
+            'POST',
+            '/api/v1/inbox',
+            { candidate: grace.slug, as: acme.org.slug, body: 'Sprint 3 is done?' },
+            acme.auth,
+          )
+        ).json()) as { threadId: string };
 
         // A wallet the payee does not hold is refused in words.
-        const wrong = await send('POST', `/api/v1/inbox/${started.threadId}/invoices`, { amount: '1200', currency: 'SOL', description: 'Sprint 3' }, grace.auth);
+        const wrong = await send(
+          'POST',
+          `/api/v1/inbox/${started.threadId}/invoices`,
+          { amount: '1200', currency: 'SOL', description: 'Sprint 3' },
+          grace.auth,
+        );
         assert.equal(wrong.status, 400);
-        assert.match(((await wrong.json()) as { error: { message: string } }).error.message, /no SOL wallet.*USDC_POL, BTC/);
+        assert.match(
+          ((await wrong.json()) as { error: { message: string } }).error.message,
+          /no SOL wallet.*USDC_POL, BTC/,
+        );
 
         // The payer cannot send an invoice either: they have no wallet connected.
-        const notPayee = await send('POST', `/api/v1/inbox/${started.threadId}/invoices`, { amount: '5', description: 'x' }, acme.auth);
+        const notPayee = await send(
+          'POST',
+          `/api/v1/inbox/${started.threadId}/invoices`,
+          { amount: '5', description: 'x' },
+          acme.auth,
+        );
         assert.equal(notPayee.status, 400);
-        assert.match(((await notPayee.json()) as { error: { message: string } }).error.message, /Connect a CoinPay account/);
+        assert.match(
+          ((await notPayee.json()) as { error: { message: string } }).error.message,
+          /Connect a CoinPay account/,
+        );
 
         sentMail.length = 0;
-        const sent = await send('POST', `/api/v1/inbox/${started.threadId}/invoices`, { amount: '$1,200.50', currency: 'usdc_pol', description: 'Sprint 3, as agreed' }, grace.auth);
-        const invoice = (await asJson<{ invoice: { id: string; amountUsd: string; currency: string; walletAddress: string; status: string; payment: unknown } }>(sent, 201)).invoice;
+        const sent = await send(
+          'POST',
+          `/api/v1/inbox/${started.threadId}/invoices`,
+          { amount: '$1,200.50', currency: 'usdc_pol', description: 'Sprint 3, as agreed' },
+          grace.auth,
+        );
+        const invoice = (
+          await asJson<{
+            invoice: {
+              id: string;
+              amountUsd: string;
+              currency: string;
+              walletAddress: string;
+              status: string;
+              payment: unknown;
+            };
+          }>(sent, 201)
+        ).invoice;
         assert.equal(invoice.amountUsd, '1200.50');
         assert.equal(invoice.currency, 'USDC_POL');
         assert.equal(invoice.walletAddress, '0xGRACE', 'the payee wallet is copied at send time');
         assert.equal(invoice.status, 'sent');
         assert.equal(invoice.payment, null, 'no quote until somebody goes to pay');
         const told = sentMail.find((mail) => mail.to === acme.user.email);
-        assert.ok(told && /sent you an invoice/.test(told.subject), 'the payer is told there is an invoice');
+        assert.ok(
+          told && /sent you an invoice/.test(told.subject),
+          'the payer is told there is an invoice',
+        );
         assert.ok(!told.text.includes('1200'), 'and not how much');
 
         // It is a message in the thread.
-        const thread = (await (await send('GET', `/api/v1/inbox/${started.threadId}`, undefined, acme.auth)).json()) as {
+        const thread = (await (
+          await send('GET', `/api/v1/inbox/${started.threadId}`, undefined, acme.auth)
+        ).json()) as {
           thread: { messages: { kind: string; invoiceId: string | null; body: string }[] };
           invoices: { id: string }[];
         };
@@ -1699,71 +1910,192 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         // The flat spelling: POST /invoices with the thread in the body, and the
         // field names the invoice object itself uses. An invoice always belongs
         // to a conversation, so no threadId is a 400, not a 404.
-        const noThread = await send('POST', '/api/v1/invoices', { amountUsd: '0.50', currency: 'BTC' }, grace.auth);
+        const noThread = await send(
+          'POST',
+          '/api/v1/invoices',
+          { amountUsd: '0.50', currency: 'BTC' },
+          grace.auth,
+        );
         assert.equal(noThread.status, 400);
-        assert.match(((await noThread.json()) as { error: { message: string } }).error.message, /threadId/);
-        const notMine = await send('POST', '/api/v1/invoices', { threadId: started.threadId, amountUsd: '0.50', walletAddress: 'bc1somebodyelse' }, grace.auth);
+        assert.match(
+          ((await noThread.json()) as { error: { message: string } }).error.message,
+          /threadId/,
+        );
+        const notMine = await send(
+          'POST',
+          '/api/v1/invoices',
+          { threadId: started.threadId, amountUsd: '0.50', walletAddress: 'bc1somebodyelse' },
+          grace.auth,
+        );
         assert.equal(notMine.status, 400);
-        assert.match(((await notMine.json()) as { error: { message: string } }).error.message, /not on your CoinPay account/);
-        const mismatch = await send('POST', '/api/v1/invoices', { threadId: started.threadId, amountUsd: '0.50', currency: 'BTC', walletAddress: '0xGRACE' }, grace.auth);
+        assert.match(
+          ((await notMine.json()) as { error: { message: string } }).error.message,
+          /not on your CoinPay account/,
+        );
+        const mismatch = await send(
+          'POST',
+          '/api/v1/invoices',
+          {
+            threadId: started.threadId,
+            amountUsd: '0.50',
+            currency: 'BTC',
+            walletAddress: '0xGRACE',
+          },
+          grace.auth,
+        );
         assert.equal(mismatch.status, 400);
-        assert.match(((await mismatch.json()) as { error: { message: string } }).error.message, /on USDC_POL, not BTC/);
-        const flat = await send('POST', '/api/v1/invoices', { threadId: started.threadId, amountUsd: '0.50', walletAddress: '0xGRACE', description: 'register + promote' }, grace.auth);
-        const small = (await asJson<{ invoice: { id: string; threadId: string; amountUsd: string; currency: string; walletAddress: string; status: string } }>(flat, 201)).invoice;
+        assert.match(
+          ((await mismatch.json()) as { error: { message: string } }).error.message,
+          /on USDC_POL, not BTC/,
+        );
+        const flat = await send(
+          'POST',
+          '/api/v1/invoices',
+          {
+            threadId: started.threadId,
+            amountUsd: '0.50',
+            walletAddress: '0xGRACE',
+            description: 'register + promote',
+          },
+          grace.auth,
+        );
+        const small = (
+          await asJson<{
+            invoice: {
+              id: string;
+              threadId: string;
+              amountUsd: string;
+              currency: string;
+              walletAddress: string;
+              status: string;
+            };
+          }>(flat, 201)
+        ).invoice;
         assert.equal(small.threadId, started.threadId);
         assert.equal(small.amountUsd, '0.50');
         assert.equal(small.currency, 'USDC_POL', 'the wallet address picks the chain');
         assert.equal(small.walletAddress, '0xGRACE');
         assert.equal(small.status, 'sent');
-        const unknownThread = await send('POST', '/api/v1/invoices', { threadId: '00000000-0000-4000-8000-000000000000', amount: '1', currency: 'BTC' }, grace.auth);
+        const unknownThread = await send(
+          'POST',
+          '/api/v1/invoices',
+          { threadId: '00000000-0000-4000-8000-000000000000', amount: '1', currency: 'BTC' },
+          grace.auth,
+        );
         assert.equal(unknownThread.status, 404);
 
         // The payee cannot pay themselves; the payer gets a quote.
-        const self = await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, grace.auth);
+        const self = await send(
+          'POST',
+          `/api/v1/invoices/${invoice.id}/pay`,
+          undefined,
+          grace.auth,
+        );
         assert.equal(self.status, 400);
-        const quote = await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, acme.auth);
-        const quoted = (await asJson<{ invoice: { payment: { id: string; url: string; address: string; amountCrypto: string } } }>(quote, 200)).invoice.payment;
+        const quote = await send(
+          'POST',
+          `/api/v1/invoices/${invoice.id}/pay`,
+          undefined,
+          acme.auth,
+        );
+        const quoted = (
+          await asJson<{
+            invoice: {
+              payment: { id: string; url: string; address: string; amountCrypto: string };
+            };
+          }>(quote, 200)
+        ).invoice.payment;
         assert.equal(quoted.url, `https://coinpay.test/pay/${quoted.id}`);
         assert.equal(quoted.address, '0xDEPOSIT');
         const minted = payments.get(quoted.id)!;
-        assert.equal(minted['merchant_wallet_address'], '0xGRACE', 'CoinPay was told to pay the payee');
+        assert.equal(
+          minted['merchant_wallet_address'],
+          '0xGRACE',
+          'CoinPay was told to pay the payee',
+        );
         assert.equal(minted['business_id'], 'biz_board', 'under the board business');
 
         // Paying again inside the quote window is the same quote.
-        const again = ((await (await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, acme.auth)).json()) as { invoice: { payment: { id: string } } }).invoice.payment;
+        const again = (
+          (await (
+            await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, acme.auth)
+          ).json()) as { invoice: { payment: { id: string } } }
+        ).invoice.payment;
         assert.equal(again.id, quoted.id);
 
         // The page sends a browser straight to CoinPay.
-        const go = await send('POST', `/inbox/${started.threadId}/invoices/${invoice.id}/pay`, undefined, acme.cookie);
+        const go = await send(
+          'POST',
+          `/inbox/${started.threadId}/invoices/${invoice.id}/pay`,
+          undefined,
+          acme.cookie,
+        );
         assert.equal(go.status, 303);
         assert.equal(go.headers.get('location'), quoted.url);
 
         // A webhook with the wrong signature is dropped; the right one settles it.
         const { createHmac } = await import('node:crypto');
-        const body = JSON.stringify({ event: 'payment.confirmed', payment_id: quoted.id, tx_hash: '0xTX', status: 'confirmed' });
+        const body = JSON.stringify({
+          event: 'payment.confirmed',
+          payment_id: quoted.id,
+          tx_hash: '0xTX',
+          status: 'confirmed',
+        });
         const t = Math.floor(Date.now() / 1000);
-        const signWith = (secret: string) => `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`;
-        assert.equal((await send('POST', '/api/v1/coinpay/webhook', body, { 'x-coinpay-signature': signWith('whsec_wrong') })).status, 401);
+        const signWith = (secret: string) =>
+          `t=${t},v1=${createHmac('sha256', secret).update(`${t}.${body}`).digest('hex')}`;
+        assert.equal(
+          (
+            await send('POST', '/api/v1/coinpay/webhook', body, {
+              'x-coinpay-signature': signWith('whsec_wrong'),
+            })
+          ).status,
+          401,
+        );
         assert.equal((await send('POST', '/api/v1/coinpay/webhook', body)).status, 401);
-        const hook = await send('POST', '/api/v1/coinpay/webhook', body, { 'x-coinpay-signature': signWith(WEBHOOK_SECRET) });
+        const hook = await send('POST', '/api/v1/coinpay/webhook', body, {
+          'x-coinpay-signature': signWith(WEBHOOK_SECRET),
+        });
         assert.equal((await asJson<{ outcome: string }>(hook, 200)).outcome, 'paid');
 
-        const paid = ((await (await send('GET', `/api/v1/invoices/${invoice.id}`, undefined, grace.auth)).json()) as { invoice: { status: string; txHash: string } }).invoice;
+        const paid = (
+          (await (
+            await send('GET', `/api/v1/invoices/${invoice.id}`, undefined, grace.auth)
+          ).json()) as { invoice: { status: string; txHash: string } }
+        ).invoice;
         assert.equal(paid.status, 'paid');
         assert.equal(paid.txHash, '0xTX');
 
         // Paid is paid: no cancelling, no second payment.
-        assert.equal((await send('POST', `/api/v1/invoices/${invoice.id}/cancel`, undefined, grace.auth)).status, 409);
-        const settled = await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, acme.auth);
+        assert.equal(
+          (await send('POST', `/api/v1/invoices/${invoice.id}/cancel`, undefined, grace.auth))
+            .status,
+          409,
+        );
+        const settled = await send(
+          'POST',
+          `/api/v1/invoices/${invoice.id}/pay`,
+          undefined,
+          acme.auth,
+        );
         assert.equal(settled.status, 400);
-        assert.match(((await settled.json()) as { error: { message: string } }).error.message, /already paid/);
+        assert.match(
+          ((await settled.json()) as { error: { message: string } }).error.message,
+          /already paid/,
+        );
 
         // Both sides list it.
-        const mine = (await (await send('GET', '/api/v1/invoices', undefined, grace.auth)).json()) as { items: { id: string }[] };
+        const mine = (await (
+          await send('GET', '/api/v1/invoices', undefined, grace.auth)
+        ).json()) as { items: { id: string }[] };
         assert.ok(mine.items.some((item) => item.id === invoice.id));
-        const theirs = (await (await send('GET', '/api/v1/invoices', undefined, acme.auth)).json()) as { items: { id: string }[] };
+        const theirs = (await (
+          await send('GET', '/api/v1/invoices', undefined, acme.auth)
+        ).json()) as { items: { id: string }[] };
         assert.ok(theirs.items.some((item) => item.id === invoice.id));
-        const page = await (await send('GET', '/me', undefined, { accept: 'text/html', ...grace.cookie })).text();
+        const page = await (
+          await send('GET', '/me', undefined, { accept: 'text/html', ...grace.cookie })
+        ).text();
         assert.ok(page.includes('Connected'), 'the You page shows the connection');
         assert.ok(page.includes('0xGRACE'));
         assert.ok(page.includes('You invoiced'));
@@ -1776,19 +2108,47 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         scopeToGrant = 'openid profile email wallet:read';
         subToGrant = `merchant-polled-${Date.now()}`;
         assert.equal((await connect(grace)).status, 303);
-        const started = (await (await send('POST', '/api/v1/inbox', { candidate: grace.slug, as: acme.org.slug, body: 'Invoice me.' }, acme.auth)).json()) as { threadId: string };
-        const invoice = ((await (await send('POST', `/api/v1/inbox/${started.threadId}/invoices`, { amount: '10', currency: 'BTC' }, grace.auth)).json()) as { invoice: { id: string } }).invoice;
+        const started = (await (
+          await send(
+            'POST',
+            '/api/v1/inbox',
+            { candidate: grace.slug, as: acme.org.slug, body: 'Invoice me.' },
+            acme.auth,
+          )
+        ).json()) as { threadId: string };
+        const invoice = (
+          (await (
+            await send(
+              'POST',
+              `/api/v1/inbox/${started.threadId}/invoices`,
+              { amount: '10', currency: 'BTC' },
+              grace.auth,
+            )
+          ).json()) as { invoice: { id: string } }
+        ).invoice;
 
-        const first = ((await (await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, acme.auth)).json()) as { invoice: { payment: { id: string } } }).invoice.payment;
+        const first = (
+          (await (
+            await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, acme.auth)
+          ).json()) as { invoice: { payment: { id: string } } }
+        ).invoice.payment;
         // CoinPay says that quote died.
         payments.get(first.id)!['status'] = 'expired';
-        const second = ((await (await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, acme.auth)).json()) as { invoice: { payment: { id: string } } }).invoice.payment;
+        const second = (
+          (await (
+            await send('POST', `/api/v1/invoices/${invoice.id}/pay`, undefined, acme.auth)
+          ).json()) as { invoice: { payment: { id: string } } }
+        ).invoice.payment;
         assert.notEqual(second.id, first.id, 'a dead quote is replaced');
 
         // CoinPay says the new one was paid, and no webhook arrived.
         payments.get(second.id)!['status'] = 'forwarded';
         payments.get(second.id)!['tx_hash'] = '0xPOLLED';
-        const read = ((await (await send('GET', `/api/v1/invoices/${invoice.id}`, undefined, acme.auth)).json()) as { invoice: { status: string; txHash: string } }).invoice;
+        const read = (
+          (await (
+            await send('GET', `/api/v1/invoices/${invoice.id}`, undefined, acme.auth)
+          ).json()) as { invoice: { status: string; txHash: string } }
+        ).invoice;
         assert.equal(read.status, 'paid');
         assert.equal(read.txHash, '0xPOLLED');
       });
@@ -1800,8 +2160,13 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         subToGrant = `merchant-narrowed-${Date.now()}`;
         const back = await connect(grace);
         assert.equal(back.status, 303);
-        assert.match(decodeURIComponent(back.headers.get('location') ?? ''), /did not grant wallet:read/);
-        const state = (await (await send('GET', '/api/v1/coinpay', undefined, grace.auth)).json()) as { account: unknown };
+        assert.match(
+          decodeURIComponent(back.headers.get('location') ?? ''),
+          /did not grant wallet:read/,
+        );
+        const state = (await (
+          await send('GET', '/api/v1/coinpay', undefined, grace.auth)
+        ).json()) as { account: unknown };
         assert.equal(state.account, null, 'nothing is stored that cannot be paid to');
         scopeToGrant = 'openid profile email wallet:read';
       });
@@ -1815,16 +2180,29 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         const second = await candidate('Grace Second');
         assert.equal((await connect(first)).status, 303);
         const back = await connect(second);
-        assert.match(decodeURIComponent(back.headers.get('location') ?? ''), /already connected to a different account/);
+        assert.match(
+          decodeURIComponent(back.headers.get('location') ?? ''),
+          /already connected to a different account/,
+        );
         // Releasing it frees it for the other.
         assert.equal((await send('DELETE', '/api/v1/coinpay', undefined, first.auth)).status, 200);
-        assert.equal(decodeURIComponent((await connect(second)).headers.get('location') ?? ''), '/me?coinpay=connected#billing');
+        assert.equal(
+          decodeURIComponent((await connect(second)).headers.get('location') ?? ''),
+          '/me?coinpay=connected#billing',
+        );
       });
 
       test('a stale or reused state is refused', async () => {
         if (pool === null) return;
-        assert.equal((await send('GET', '/api/v1/coinpay/callback?code=good-code&state=never-issued')).status, 303);
-        const where = decodeURIComponent((await send('GET', '/api/v1/coinpay/callback?code=good-code&state=never-issued')).headers.get('location') ?? '');
+        assert.equal(
+          (await send('GET', '/api/v1/coinpay/callback?code=good-code&state=never-issued')).status,
+          303,
+        );
+        const where = decodeURIComponent(
+          (
+            await send('GET', '/api/v1/coinpay/callback?code=good-code&state=never-issued')
+          ).headers.get('location') ?? '',
+        );
         assert.match(where, /expired/);
         assert.equal((await send('GET', '/api/v1/coinpay/callback')).status, 400);
       });
@@ -1845,7 +2223,8 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
     const candidate = async (name: string) => {
       const { createSession, ensureUser } = await import('../dist/core/auth.js');
-      const { createResume, updateResume, ensurePublicSlug } = await import('../dist/core/resumes.js');
+      const { createResume, updateResume, ensurePublicSlug } =
+        await import('../dist/core/resumes.js');
       const stamp = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
       const user = await ensureUser(pool as never, `recc+${stamp}@example.com`);
       const token = await createSession(pool as never, user.id, { label: 't' });
@@ -1853,7 +2232,10 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         markdown: `# ${name}\n\nStaff engineer\n\n## Skills\n\n- TypeScript\n`,
         title: name,
       });
-      const saved = await updateResume(pool as never, user.id, created.slug, { markdown: created.markdown, visibility: 'public' });
+      const saved = await updateResume(pool as never, user.id, created.slug, {
+        markdown: created.markdown,
+        visibility: 'public',
+      });
       const slug = await ensurePublicSlug(pool as never, saved);
       return { user, slug, token, auth: { authorization: `Bearer ${token}` } };
     };
@@ -1873,14 +2255,22 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       );
       const writtenBody = await written.text();
       assert.equal(written.status, 201, writtenBody);
-      const rec = (JSON.parse(writtenBody) as { recommendation: { id: string; status: string; author: { name: string; kind: string } } }).recommendation;
+      const rec = (
+        JSON.parse(writtenBody) as {
+          recommendation: { id: string; status: string; author: { name: string; kind: string } };
+        }
+      ).recommendation;
       assert.equal(rec.status, 'pending');
       assert.equal(rec.author.kind, 'employer');
 
       // Not on the page yet, for anybody.
-      const before = (await (await get(`/api/v1/candidates/${ada.slug}/recommendations`)).json()) as { items: unknown[] };
+      const before = (await (
+        await get(`/api/v1/candidates/${ada.slug}/recommendations`)
+      ).json()) as { items: unknown[] };
       assert.equal(before.items.length, 0);
-      const pageBefore = await (await get(`/candidates/${ada.slug}`, { accept: 'text/html' })).text();
+      const pageBefore = await (
+        await get(`/candidates/${ada.slug}`, { accept: 'text/html' })
+      ).text();
       assert.ok(!pageBefore.includes(WORDS), 'a pending recommendation is not on the page');
 
       // The candidate was told, with the words in the mail.
@@ -1899,24 +2289,40 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
       // A stranger cannot approve it; the subject can.
       const stranger = await candidate('Bda Rec');
-      assert.equal((await post(`/api/v1/recommendations/${rec.id}/approve`, {}, stranger.auth)).status, 404);
+      assert.equal(
+        (await post(`/api/v1/recommendations/${rec.id}/approve`, {}, stranger.auth)).status,
+        404,
+      );
       const approved = await post(`/api/v1/recommendations/${rec.id}/approve`, {}, ada.auth);
       assert.equal(approved.status, 200, await approved.text());
 
-      const after = (await (await get(`/api/v1/candidates/${ada.slug}/recommendations`)).json()) as {
-        items: { body: string; author: { name: string; slug: string | null }; relationship: string | null }[];
+      const after = (await (
+        await get(`/api/v1/candidates/${ada.slug}/recommendations`)
+      ).json()) as {
+        items: {
+          body: string;
+          author: { name: string; slug: string | null };
+          relationship: string | null;
+        }[];
       };
       assert.equal(after.items.length, 1);
       assert.equal(after.items[0]?.body, WORDS);
       assert.equal(after.items[0]?.author.slug, acme.org.slug);
       assert.equal(after.items[0]?.relationship, 'Hired her for a three-month contract');
-      const pageAfter = await (await get(`/candidates/${ada.slug}`, { accept: 'text/html' })).text();
+      const pageAfter = await (
+        await get(`/candidates/${ada.slug}`, { accept: 'text/html' })
+      ).text();
       assert.ok(pageAfter.includes('two weeks early'), 'an approved recommendation is on the page');
       assert.match(pageAfter, /shown because Ada Rec approved/);
 
       // And can be taken down again later.
-      assert.equal((await post(`/api/v1/recommendations/${rec.id}/reject`, {}, ada.auth)).status, 200);
-      const gone = (await (await get(`/api/v1/candidates/${ada.slug}/recommendations`)).json()) as { items: unknown[] };
+      assert.equal(
+        (await post(`/api/v1/recommendations/${rec.id}/reject`, {}, ada.auth)).status,
+        200,
+      );
+      const gone = (await (await get(`/api/v1/candidates/${ada.slug}/recommendations`)).json()) as {
+        items: unknown[];
+      };
       assert.equal(gone.items.length, 0);
     });
 
@@ -1925,27 +2331,55 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const acme = await employer('Bcme Rec');
       const ada = await candidate('Cda Rec');
       const first = (await (
-        await post(`/api/v1/orgs/${acme.org.slug}/recommendations`, { body: 'Paid on time, every time, and the brief was the brief.' }, ada.auth)
-      ).json()) as { recommendation: { id: string; author: { kind: string; slug: string | null } } };
+        await post(
+          `/api/v1/orgs/${acme.org.slug}/recommendations`,
+          { body: 'Paid on time, every time, and the brief was the brief.' },
+          ada.auth,
+        )
+      ).json()) as {
+        recommendation: { id: string; author: { kind: string; slug: string | null } };
+      };
       assert.equal(first.recommendation.author.kind, 'candidate');
       assert.equal(first.recommendation.author.slug, ada.slug, 'signed by the page');
 
-      assert.equal((await post(`/api/v1/recommendations/${first.recommendation.id}/approve`, {}, acme.auth)).status, 200);
-      const up = (await (await get(`/api/v1/orgs/${acme.org.slug}/recommendations`)).json()) as { items: unknown[] };
+      assert.equal(
+        (await post(`/api/v1/recommendations/${first.recommendation.id}/approve`, {}, acme.auth))
+          .status,
+        200,
+      );
+      const up = (await (await get(`/api/v1/orgs/${acme.org.slug}/recommendations`)).json()) as {
+        items: unknown[];
+      };
       assert.equal(up.items.length, 1);
 
       const again = (await (
-        await post(`/api/v1/orgs/${acme.org.slug}/recommendations`, { body: 'Paid on time, every time. Would work with them again tomorrow.' }, ada.auth)
+        await post(
+          `/api/v1/orgs/${acme.org.slug}/recommendations`,
+          { body: 'Paid on time, every time. Would work with them again tomorrow.' },
+          ada.auth,
+        )
       ).json()) as { recommendation: { id: string; status: string } };
       assert.equal(again.recommendation.id, first.recommendation.id, 'one per author per subject');
       assert.equal(again.recommendation.status, 'pending', 'a rewrite asks for approval again');
-      const down = (await (await get(`/api/v1/orgs/${acme.org.slug}/recommendations`)).json()) as { items: unknown[] };
+      const down = (await (await get(`/api/v1/orgs/${acme.org.slug}/recommendations`)).json()) as {
+        items: unknown[];
+      };
       assert.equal(down.items.length, 0, 'the earlier approval does not cover the new words');
 
       // The author can withdraw it; the subject cannot.
-      assert.equal((await post(`/api/v1/recommendations/${first.recommendation.id}/withdraw`, {}, acme.auth)).status, 404);
-      assert.equal((await post(`/api/v1/recommendations/${first.recommendation.id}/withdraw`, {}, ada.auth)).status, 200);
-      const mine = (await (await get('/api/v1/me/recommendations', ada.auth)).json()) as { given: unknown[] };
+      assert.equal(
+        (await post(`/api/v1/recommendations/${first.recommendation.id}/withdraw`, {}, acme.auth))
+          .status,
+        404,
+      );
+      assert.equal(
+        (await post(`/api/v1/recommendations/${first.recommendation.id}/withdraw`, {}, ada.auth))
+          .status,
+        200,
+      );
+      const mine = (await (await get('/api/v1/me/recommendations', ada.auth)).json()) as {
+        given: unknown[];
+      };
       assert.equal(mine.given.length, 0);
     });
 
@@ -1957,21 +2391,68 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       // An account with no published resume and no employer has nothing to sign with.
       const { createSession, ensureUser } = await import('../dist/core/auth.js');
       const nobody = await ensureUser(pool as never, `nobody+${Date.now()}@example.com`);
-      const nobodyAuth = { authorization: `Bearer ${await createSession(pool as never, nobody.id, { label: 't' })}` };
-      const refused = await post(`/api/v1/candidates/${ada.slug}/recommendations`, { body: WORDS }, nobodyAuth);
+      const nobodyAuth = {
+        authorization: `Bearer ${await createSession(pool as never, nobody.id, { label: 't' })}`,
+      };
+      const refused = await post(
+        `/api/v1/candidates/${ada.slug}/recommendations`,
+        { body: WORDS },
+        nobodyAuth,
+      );
       assert.equal(refused.status, 403);
-      assert.equal(((await refused.json()) as { error: { code: string } }).error.code, 'no_profile');
+      assert.equal(
+        ((await refused.json()) as { error: { code: string } }).error.code,
+        'no_profile',
+      );
 
       // An employer's member has an employer to sign with, but must say so.
-      const unsigned = await post(`/api/v1/candidates/${ada.slug}/recommendations`, { body: WORDS }, acme.auth);
+      const unsigned = await post(
+        `/api/v1/candidates/${ada.slug}/recommendations`,
+        { body: WORDS },
+        acme.auth,
+      );
       assert.equal(unsigned.status, 403);
 
       // Yourself, your own employer, and too few words.
-      assert.equal((await post(`/api/v1/candidates/${ada.slug}/recommendations`, { body: WORDS }, ada.auth)).status, 400);
-      assert.equal((await post(`/api/v1/orgs/${acme.org.slug}/recommendations`, { body: WORDS, as: acme.org.slug }, acme.auth)).status, 400);
-      assert.equal((await post(`/api/v1/candidates/${ada.slug}/recommendations`, { body: 'Good.', as: acme.org.slug }, acme.auth)).status, 400);
-      assert.equal((await post('/api/v1/candidates/no-such-person/recommendations', { body: WORDS, as: acme.org.slug }, acme.auth)).status, 404);
-      assert.equal((await post(`/api/v1/candidates/${ada.slug}/recommendations`, { body: WORDS })).status, 401);
+      assert.equal(
+        (await post(`/api/v1/candidates/${ada.slug}/recommendations`, { body: WORDS }, ada.auth))
+          .status,
+        400,
+      );
+      assert.equal(
+        (
+          await post(
+            `/api/v1/orgs/${acme.org.slug}/recommendations`,
+            { body: WORDS, as: acme.org.slug },
+            acme.auth,
+          )
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await post(
+            `/api/v1/candidates/${ada.slug}/recommendations`,
+            { body: 'Good.', as: acme.org.slug },
+            acme.auth,
+          )
+        ).status,
+        400,
+      );
+      assert.equal(
+        (
+          await post(
+            '/api/v1/candidates/no-such-person/recommendations',
+            { body: WORDS, as: acme.org.slug },
+            acme.auth,
+          )
+        ).status,
+        404,
+      );
+      assert.equal(
+        (await post(`/api/v1/candidates/${ada.slug}/recommendations`, { body: WORDS })).status,
+        401,
+      );
     });
 
     test('the pages carry the form for a signed-in reader and the section on /me', async () => {
@@ -1979,13 +2460,23 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const acme = await employer('Dcme Rec');
       const ada = await candidate('Eda Rec');
       const page = await (
-        await get(`/candidates/${ada.slug}`, { accept: 'text/html', cookie: `aj_session=${acme.token}` })
+        await get(`/candidates/${ada.slug}`, {
+          accept: 'text/html',
+          cookie: `aj_session=${acme.token}`,
+        })
       ).text();
       assert.match(page, new RegExp(`action="/candidates/${ada.slug}/recommend"`));
-      assert.match(page, new RegExp(`<option value="${acme.org.slug}"`), 'the employer is offered as the signature');
+      assert.match(
+        page,
+        new RegExp(`<option value="${acme.org.slug}"`),
+        'the employer is offered as the signature',
+      );
 
       const own = await (
-        await get(`/candidates/${ada.slug}`, { accept: 'text/html', cookie: `aj_session=${ada.token}` })
+        await get(`/candidates/${ada.slug}`, {
+          accept: 'text/html',
+          cookie: `aj_session=${ada.token}`,
+        })
       ).text();
       assert.ok(!own.includes(`/candidates/${ada.slug}/recommend`), 'no form on your own page');
 
@@ -1996,12 +2487,21 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const sent = await app!.fetch(
         new Request(`http://board.test/candidates/${ada.slug}/recommend`, {
           method: 'POST',
-          headers: { 'content-type': 'application/x-www-form-urlencoded', cookie: `aj_session=${acme.token}` },
-          body: new URLSearchParams({ as: acme.org.slug, body: WORDS, relationship: 'Hired her' }).toString(),
+          headers: {
+            'content-type': 'application/x-www-form-urlencoded',
+            cookie: `aj_session=${acme.token}`,
+          },
+          body: new URLSearchParams({
+            as: acme.org.slug,
+            body: WORDS,
+            relationship: 'Hired her',
+          }).toString(),
         }),
       );
       assert.equal(sent.status, 303, await sent.text());
-      const me = await (await get('/me', { accept: 'text/html', cookie: `aj_session=${ada.token}` })).text();
+      const me = await (
+        await get('/me', { accept: 'text/html', cookie: `aj_session=${ada.token}` })
+      ).text();
       assert.match(me, /1 waiting for you/);
       assert.match(me, /two weeks early/);
       assert.match(me, /\/me\/recommendations\/[0-9a-f-]+\/approve/);
@@ -2011,9 +2511,8 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
   describe('candidates', () => {
     const publish = async (visibility: string, name: string) => {
       const { createSession, ensureUser } = await import('../dist/core/auth.js');
-      const { createResume, updateResume, ensurePublicSlug } = await import(
-        '../dist/core/resumes.js'
-      );
+      const { createResume, updateResume, ensurePublicSlug } =
+        await import('../dist/core/resumes.js');
       const user = await ensureUser(pool as never, `cand+${Date.now()}+${name}@example.com`);
       const token = await createSession(pool as never, user.id, { label: 't' });
       const created = await createResume(pool as never, user.id, {
@@ -2075,9 +2574,8 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
     test('contact channels are for signed-in callers, in every representation', async () => {
       if (pool === null) return;
       const { createSession, ensureUser } = await import('../dist/core/auth.js');
-      const { createResume, updateResume, ensurePublicSlug } = await import(
-        '../dist/core/resumes.js'
-      );
+      const { createResume, updateResume, ensurePublicSlug } =
+        await import('../dist/core/resumes.js');
       const user = await ensureUser(pool as never, `cand+${Date.now()}+gate@example.com`);
       const token = await createSession(pool as never, user.id, { label: 't' });
       const created = await createResume(pool as never, user.id, {
@@ -2139,9 +2637,8 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       // "name" is the entire CV. Unbounded, that produced a three thousand
       // character slug and a candidate card captioned with a whole resume.
       if (pool === null) return;
-      const { createResume, updateResume, ensurePublicSlug } = await import(
-        '../dist/core/resumes.js'
-      );
+      const { createResume, updateResume, ensurePublicSlug } =
+        await import('../dist/core/resumes.js');
       const { toCandidateSummary } = await import('../dist/core/candidates.js');
       const { ensureUser } = await import('../dist/core/auth.js');
 
@@ -2207,7 +2704,15 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
       // Node.js is beyond the eight badges shown on a directory card.
       const both = await publish('Both Person', [
-        'Python', 'Go', 'SQL', 'Docker', 'Linux', 'TypeScript', 'JavaScript', 'React', 'Node.js',
+        'Python',
+        'Go',
+        'SQL',
+        'Docker',
+        'Linux',
+        'TypeScript',
+        'JavaScript',
+        'React',
+        'Node.js',
       ]);
       const one = await publish('One Person', ['JavaScript']);
 
@@ -2239,7 +2744,9 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
 
       // The display limit must not change who matches in other representations.
       for (const path of ['/candidates', '/candidates.md']) {
-        const response = await get(`${path}?tags=javascript,react,node.js`, { accept: 'text/html' });
+        const response = await get(`${path}?tags=javascript,react,node.js`, {
+          accept: 'text/html',
+        });
         assert.equal(response.status, 200);
         const body = await response.text();
         assert.match(body, /Both Person/);
@@ -2286,7 +2793,9 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
         }),
       );
       assert.equal(response.status, 200);
-      const edited = (await response.json()) as { job: { slug: string; title: string; description: string } };
+      const edited = (await response.json()) as {
+        job: { slug: string; title: string; description: string };
+      };
 
       assert.equal(edited.job.slug, created.job.slug, 'the URL must survive an edit');
       assert.equal(edited.job.description, 'Second draft, spelled right.');
@@ -2294,7 +2803,7 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       assert.equal(edited.job.title, created.job.title);
     });
 
-    test('editing someone else\'s listing is refused', async () => {
+    test("editing someone else's listing is refused", async () => {
       if (pool === null) return;
       const { createSession, ensureUser } = await import('../dist/core/auth.js');
       const stranger = await ensureUser(pool as never, `stranger+${Date.now()}@example.com`);
@@ -2456,7 +2965,12 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const response = (await (
         await post(
           '/api/mcp',
-          { jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'whoami', arguments: {} } },
+          {
+            jsonrpc: '2.0',
+            id: 9,
+            method: 'tools/call',
+            params: { name: 'whoami', arguments: {} },
+          },
           { cookie: `aj_session=${token}` },
         )
       ).json()) as { result: { isError?: boolean; content: { text: string }[] } };
@@ -2501,9 +3015,9 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const tag = page.items[0]?.tags[0] ?? page.items[0]?.stack[0];
       if (tag === undefined) return;
 
-      const comma = (await (
-        await get(`/api/v1/jobs?tags=${encodeURIComponent(tag)}`)
-      ).json()) as { total: number };
+      const comma = (await (await get(`/api/v1/jobs?tags=${encodeURIComponent(tag)}`)).json()) as {
+        total: number;
+      };
       const repeated = (await (
         await get(`/api/v1/jobs?tag=${encodeURIComponent(tag)}`)
       ).json()) as { total: number };
@@ -2650,7 +3164,9 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const page = (await (await get('/api/v1/jobs?limit=1')).json()) as {
         items: { slug: string }[];
       };
-      const html = await (await get(`/jobs/${page.items[0]?.slug}`, { accept: 'text/html' })).text();
+      const html = await (
+        await get(`/jobs/${page.items[0]?.slug}`, { accept: 'text/html' })
+      ).text();
       assert.match(html, /application\/ld\+json/);
       assert.match(html, /"@type":"JobPosting"/);
     });

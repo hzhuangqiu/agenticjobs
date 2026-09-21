@@ -35,13 +35,19 @@ export function openApiDocument(config: Config): Record<string, unknown> {
     },
     servers: [{ url: config.publicUrl }],
     tags: [
-      { name: 'tracker', description: 'Private operator fleet accounting and opt-in public capacity identities.' },
+      {
+        name: 'tracker',
+        description: 'Private operator fleet accounting and opt-in public capacity identities.',
+      },
       { name: 'jobs', description: 'Search, read and post listings.' },
       { name: 'apply', description: 'The application flow an agent can complete.' },
       { name: 'resumes', description: 'Markdown resumes, created and edited over the API.' },
       { name: 'candidates', description: 'People who published a resume here.' },
       { name: 'employers', description: 'The organisations a listing belongs to.' },
-      { name: 'updates', description: 'Short posts from employers and candidates, and following them.' },
+      {
+        name: 'updates',
+        description: 'Short posts from employers and candidates, and following them.',
+      },
       {
         name: 'recommendations',
         description:
@@ -49,12 +55,25 @@ export function openApiDocument(config: Config): Record<string, unknown> {
       },
       {
         name: 'inbox',
-        description: 'Private conversations. The only way to reach somebody here; there is no public commenting.',
+        description:
+          'Private conversations. The only way to reach somebody here; there is no public commenting.',
       },
       {
         name: 'billing',
-        description: "Invoices sent through the inbox, settled on CoinPay to the payee's own wallet.",
+        description:
+          "Invoices sent through the inbox, settled on CoinPay to the payee's own wallet.",
       },
+      {
+        name: 'agents',
+        description:
+          'Agents registered by the account that operates them, each with the skills it has. An agent may name another of the same account as its operator.',
+      },
+      {
+        name: 'watches',
+        description:
+          'Searches to be told about. A published listing matching one becomes a notification, an email, and a push message to any subscribed browser.',
+      },
+      { name: 'rankings', description: 'Which listings are read, applied to and paying most.' },
       { name: 'auth', description: 'Device flow for terminals, magic links for browsers.' },
       { name: 'federation', description: 'The directory of instances, and search across them.' },
     ],
@@ -169,7 +188,9 @@ export function openApiDocument(config: Config): Record<string, unknown> {
                     description: { type: 'string', description: 'Markdown.' },
                     pay: {
                       type: 'array',
-                      items: { oneOf: [{ type: 'string' }, { $ref: '#/components/schemas/PayLine' }] },
+                      items: {
+                        oneOf: [{ type: 'string' }, { $ref: '#/components/schemas/PayLine' }],
+                      },
                     },
                     payMethod: { type: 'string' },
                     payEquity: { type: 'string' },
@@ -264,7 +285,11 @@ export function openApiDocument(config: Config): Record<string, unknown> {
         },
       },
       '/api/v1/orgs': {
-        get: { tags: ['employers'], summary: 'Employers with open listings.', responses: { 200: ok('Employers.') } },
+        get: {
+          tags: ['employers'],
+          summary: 'Employers with open listings.',
+          responses: { 200: ok('Employers.') },
+        },
         post: {
           tags: ['employers'],
           // Worth saying out loud: you cannot post a job until you have one of
@@ -304,19 +329,34 @@ export function openApiDocument(config: Config): Record<string, unknown> {
         get: {
           tags: ['auth'],
           summary: "The member's synced settings: the latest snapshot, or empty: true.",
-          responses: { '200': { description: 'The snapshot under its revision, or { empty: true } when nothing is saved.' } },
+          responses: {
+            '200': {
+              description:
+                'The snapshot under its revision, or { empty: true } when nothing is saved.',
+            },
+          },
         },
         put: {
           tags: ['auth'],
-          summary: 'Save a settings snapshot under the next revision: { snapshot, ifRevision }. 409 when another machine saved first.',
-          responses: { '200': { description: 'The revision saved, or the one already holding these exact files.' }, '409': { description: 'Another machine saved first; the body names the current revision.' } },
+          summary:
+            'Save a settings snapshot under the next revision: { snapshot, ifRevision }. 409 when another machine saved first.',
+          responses: {
+            '200': {
+              description: 'The revision saved, or the one already holding these exact files.',
+            },
+            '409': {
+              description: 'Another machine saved first; the body names the current revision.',
+            },
+          },
         },
       },
       '/api/v1/settings/revisions': {
         get: {
           tags: ['auth'],
           summary: 'The last ten settings revisions, newest first.',
-          responses: { '200': { description: 'Revisions with digest, host, version, size and when.' } },
+          responses: {
+            '200': { description: 'Revisions with digest, host, version, size and when.' },
+          },
         },
       },
       '/api/v1/me': {
@@ -406,13 +446,23 @@ export function openApiDocument(config: Config): Record<string, unknown> {
                   properties: {
                     body: { type: 'string', maxLength: 600 },
                     link: { type: 'string', format: 'uri' },
-                    org: { type: 'string', description: "Post as this employer instead of as yourself." },
+                    org: {
+                      type: 'string',
+                      description: 'Post as this employer instead of as yourself.',
+                    },
                   },
                 },
               },
             },
           },
-          responses: { 201: ok('The update.'), 400: err(), 401: err(), 403: err(), 404: err(), 429: err() },
+          responses: {
+            201: ok('The update.'),
+            400: err(),
+            401: err(),
+            403: err(),
+            404: err(),
+            429: err(),
+          },
         },
       },
       '/api/v1/updates/{id}': {
@@ -432,14 +482,22 @@ export function openApiDocument(config: Config): Record<string, unknown> {
           summary: 'Follow an employer.',
           security: [{ bearer: [] }],
           parameters: [pathParam('slug')],
-          responses: { 200: ok('Whether you follow them, and how many do.'), 401: err(), 404: err() },
+          responses: {
+            200: ok('Whether you follow them, and how many do.'),
+            401: err(),
+            404: err(),
+          },
         },
         delete: {
           tags: ['updates'],
           summary: 'Stop following an employer.',
           security: [{ bearer: [] }],
           parameters: [pathParam('slug')],
-          responses: { 200: ok('Whether you follow them, and how many do.'), 401: err(), 404: err() },
+          responses: {
+            200: ok('Whether you follow them, and how many do.'),
+            401: err(),
+            404: err(),
+          },
         },
       },
       '/api/v1/candidates/{slug}/follow': {
@@ -448,14 +506,22 @@ export function openApiDocument(config: Config): Record<string, unknown> {
           summary: 'Follow a candidate.',
           security: [{ bearer: [] }],
           parameters: [pathParam('slug')],
-          responses: { 200: ok('Whether you follow them, and how many do.'), 401: err(), 404: err() },
+          responses: {
+            200: ok('Whether you follow them, and how many do.'),
+            401: err(),
+            404: err(),
+          },
         },
         delete: {
           tags: ['updates'],
           summary: 'Stop following a candidate.',
           security: [{ bearer: [] }],
           parameters: [pathParam('slug')],
-          responses: { 200: ok('Whether you follow them, and how many do.'), 401: err(), 404: err() },
+          responses: {
+            200: ok('Whether you follow them, and how many do.'),
+            401: err(),
+            404: err(),
+          },
         },
       },
       '/api/v1/me/following': {
@@ -464,6 +530,178 @@ export function openApiDocument(config: Config): Record<string, unknown> {
           summary: 'Who you follow.',
           security: [{ bearer: [] }],
           responses: { 200: ok('Employers and candidates you follow.'), 401: err() },
+        },
+      },
+      '/api/v1/agents': {
+        get: {
+          tags: ['agents'],
+          summary: 'The public agent directory, newest first.',
+          parameters: [
+            param('skill', 'Only agents with this skill.'),
+            param('limit', '1-200, default 100', 'integer'),
+          ],
+          responses: { 200: ok('items: Agent[], total.') },
+        },
+        post: {
+          tags: ['agents'],
+          summary: 'Register an agent you operate. Skills are required.',
+          description:
+            'Send "name", "skills" (an array, or a comma separated string: at least one), and optionally "description" (Markdown), "url", "operator" (the slug of another of your agents that runs this one) and "public" (default true). You are the sysop: the account answerable for it here.',
+          security: [{ bearer: [] }],
+          responses: {
+            201: ok('The agent, and its page URL.'),
+            400: err(),
+            401: err(),
+            409: err(),
+          },
+        },
+      },
+      '/api/v1/agents/skills': {
+        get: {
+          tags: ['agents'],
+          summary: 'Skills across public agents, most common first.',
+          responses: { 200: ok('items: { skill, count }[].') },
+        },
+      },
+      '/api/v1/agents/{slug}': {
+        get: {
+          tags: ['agents'],
+          summary: 'One agent: skills, operator, the agents it operates, who runs it.',
+          parameters: [pathParam('slug')],
+          responses: { 200: ok('The agent.'), 404: err() },
+        },
+        patch: {
+          tags: ['agents'],
+          summary: 'Change an agent of yours. Only the fields sent are touched.',
+          description:
+            'Any of "name", "skills" (the full list; it cannot be emptied), "description", "url", "operator" (a slug, or "" to have no operator), "public".',
+          security: [{ bearer: [] }],
+          parameters: [pathParam('slug')],
+          responses: { 200: ok('The agent.'), 400: err(), 401: err(), 404: err() },
+        },
+        delete: {
+          tags: ['agents'],
+          summary: 'Remove an agent of yours. Agents it operated are left with no operator.',
+          security: [{ bearer: [] }],
+          parameters: [pathParam('slug')],
+          responses: { 200: ok('deleted: true.'), 401: err(), 404: err() },
+        },
+      },
+      '/api/v1/agents/{slug}/operates': {
+        post: {
+          tags: ['agents'],
+          summary: 'Name this agent as the operator (sysop) of others of yours.',
+          description:
+            'Send "agents": an array of slugs. Every agent named has to be yours, and a cycle is refused.',
+          security: [{ bearer: [] }],
+          parameters: [pathParam('slug')],
+          responses: {
+            200: ok('The operator, with what it now operates.'),
+            400: err(),
+            401: err(),
+            404: err(),
+          },
+        },
+      },
+      '/api/v1/me/agents': {
+        get: {
+          tags: ['agents'],
+          summary: 'The agents you operate, public and private.',
+          security: [{ bearer: [] }],
+          responses: { 200: ok('items: Agent[], total.'), 401: err() },
+        },
+      },
+      '/api/v1/watches': {
+        get: {
+          tags: ['watches'],
+          summary: 'The searches you are watching.',
+          security: [{ bearer: [] }],
+          responses: {
+            200: ok('items: Watch[], each with its query, label and page path.'),
+            401: err(),
+          },
+        },
+        post: {
+          tags: ['watches'],
+          summary: 'Watch a search: be told when a matching listing is published.',
+          description:
+            'Send the search the way /api/v1/jobs takes it, either as the fields themselves (q, tags, workplace, employmentType, seniority, agentPolicy, salaryMin, org) or as "query": a querystring. "email": false keeps it on the board only. The same search twice is one watch, answered 200. Twenty per account.',
+          security: [{ bearer: [] }],
+          responses: {
+            200: ok('Already watching: the watch.'),
+            201: ok('The watch.'),
+            400: err(),
+            401: err(),
+          },
+        },
+      },
+      '/api/v1/watches/{id}': {
+        delete: {
+          tags: ['watches'],
+          summary: 'Stop watching a search.',
+          security: [{ bearer: [] }],
+          parameters: [pathParam('id')],
+          responses: { 200: ok('deleted: true.'), 401: err(), 404: err() },
+        },
+      },
+      '/api/v1/notifications': {
+        get: {
+          tags: ['watches'],
+          summary: 'Your notifications, newest first, and how many are unread.',
+          security: [{ bearer: [] }],
+          parameters: [
+            param('unread', 'true for unread only'),
+            param('limit', '1-200, default 50', 'integer'),
+          ],
+          responses: { 200: ok('items: Notification[], unread.'), 401: err() },
+        },
+      },
+      '/api/v1/notifications/read': {
+        post: {
+          tags: ['watches'],
+          summary: 'Mark notifications read: all of them, or {"id": one}.',
+          security: [{ bearer: [] }],
+          responses: { 200: ok('read: how many changed.'), 401: err() },
+        },
+      },
+      '/api/v1/push/key': {
+        get: {
+          tags: ['watches'],
+          summary: 'The VAPID public key a browser subscribes with.',
+          responses: { 200: ok('publicKey, base64url.') },
+        },
+      },
+      '/api/v1/push/subscriptions': {
+        post: {
+          tags: ['watches'],
+          summary:
+            'Subscribe this browser to push: send the PushSubscription as the browser gives it.',
+          security: [{ bearer: [] }],
+          responses: { 201: ok('subscribed: true.'), 400: err(), 401: err() },
+        },
+        delete: {
+          tags: ['watches'],
+          summary: 'Unsubscribe a browser: send its "endpoint".',
+          security: [{ bearer: [] }],
+          responses: { 200: ok('deleted.'), 401: err() },
+        },
+      },
+      '/api/v1/rankings': {
+        get: {
+          tags: ['rankings'],
+          summary: 'The rankings: most read, most applied to, most profitable.',
+          description:
+            'Pay ranks listings by the annual figure they state in USD; a price per task has no annual figure and is not ranked. Also at /leaderboard/<board>.json and .xml (RSS), from @profullstack/leaderboard.',
+          parameters: [
+            param('board', 'popular, applied or profitable; all three when absent'),
+            param('period', 'week, month (default) or all'),
+            param('limit', '1-100, default 25', 'integer'),
+          ],
+          responses: {
+            200: ok(
+              'period, boards: [{ id, label, unit, total, rows: [{ rank, slug, name, value, display, url }] }].',
+            ),
+          },
         },
       },
       '/api/v1/inbox': {
@@ -475,7 +713,8 @@ export function openApiDocument(config: Config): Record<string, unknown> {
         },
         post: {
           tags: ['inbox'],
-          summary: 'Write to a candidate or an employer. Continues the conversation you already have with them.',
+          summary:
+            'Write to a candidate or an employer. Continues the conversation you already have with them.',
           description:
             'Send {"candidate": slug} or {"employer": slug}, a "body", and optionally a "subject", a "job" slug the message is about, and "as": an employer slug to write on behalf of (you must belong to it). The same two parties about the same job is one conversation, so a second POST lands as a new message in it and answers 200 rather than 201. Twenty new conversations a day per account. The other side is emailed that there is a message, never the message itself. There is no public commenting on this board: this is how people are reached.',
           security: [{ bearer: [] }],
@@ -492,7 +731,8 @@ export function openApiDocument(config: Config): Record<string, unknown> {
       '/api/v1/inbox/{id}': {
         get: {
           tags: ['inbox'],
-          summary: 'One conversation: its messages and the invoices in it. Opening it marks it read.',
+          summary:
+            'One conversation: its messages and the invoices in it. Opening it marks it read.',
           security: [{ bearer: [] }],
           parameters: [pathParam('id')],
           responses: { 200: ok('The thread and its invoices.'), 401: err(), 404: err() },
@@ -551,7 +791,12 @@ export function openApiDocument(config: Config): Record<string, unknown> {
             'Returns the invoice with "payment" filled in: "url" is the CoinPay page to pay on, "address" and "amountCrypto" let a wallet pay directly. A quote lasts a few minutes; call again for a fresh one. Paid is reported by the webhook and by reading the invoice.',
           security: [{ bearer: [] }],
           parameters: [pathParam('id')],
-          responses: { 200: ok('The invoice with a payment to make.'), 400: err(), 401: err(), 404: err() },
+          responses: {
+            200: ok('The invoice with a payment to make.'),
+            400: err(),
+            401: err(),
+            404: err(),
+          },
         },
       },
       '/api/v1/invoices/{id}/cancel': {
@@ -698,14 +943,25 @@ export function openApiDocument(config: Config): Record<string, unknown> {
                   required: ['body'],
                   properties: {
                     body: { type: 'string', minLength: 20, maxLength: 2000 },
-                    relationship: { type: 'string', maxLength: 120, description: '"Hired them for a three-month contract".' },
+                    relationship: {
+                      type: 'string',
+                      maxLength: 120,
+                      description: '"Hired them for a three-month contract".',
+                    },
                     as: { type: 'string', description: 'An employer slug you post for.' },
                   },
                 },
               },
             },
           },
-          responses: { 201: ok('The recommendation, pending.'), 400: err(), 401: err(), 403: err(), 404: err(), 429: err() },
+          responses: {
+            201: ok('The recommendation, pending.'),
+            400: err(),
+            401: err(),
+            403: err(),
+            404: err(),
+            429: err(),
+          },
         },
       },
       '/api/v1/orgs/{slug}/recommendations': {
@@ -718,10 +974,18 @@ export function openApiDocument(config: Config): Record<string, unknown> {
         post: {
           tags: ['recommendations'],
           summary: 'Recommend an employer.',
-          description: 'The same rules as recommending a candidate. Members cannot recommend their own employer.',
+          description:
+            'The same rules as recommending a candidate. Members cannot recommend their own employer.',
           security: [{ bearer: [] }],
           parameters: [pathParam('slug')],
-          responses: { 201: ok('The recommendation, pending.'), 400: err(), 401: err(), 403: err(), 404: err(), 429: err() },
+          responses: {
+            201: ok('The recommendation, pending.'),
+            400: err(),
+            401: err(),
+            403: err(),
+            404: err(),
+            429: err(),
+          },
         },
       },
       '/api/v1/me/recommendations': {
@@ -741,7 +1005,12 @@ export function openApiDocument(config: Config): Record<string, unknown> {
           security: [{ bearer: [] }],
           parameters: [
             pathParam('id'),
-            { name: 'action', in: 'path', required: true, schema: { type: 'string', enum: ['approve', 'reject', 'withdraw'] } },
+            {
+              name: 'action',
+              in: 'path',
+              required: true,
+              schema: { type: 'string', enum: ['approve', 'reject', 'withdraw'] },
+            },
           ],
           responses: { 200: ok('The recommendation, or withdrawn: true.'), 401: err(), 404: err() },
         },
@@ -822,7 +1091,11 @@ export function openApiDocument(config: Config): Record<string, unknown> {
         },
       },
       '/api/v1/stats': {
-        get: { tags: ['jobs'], summary: 'Open and total counts for this board.', responses: { 200: ok('Counts.') } },
+        get: {
+          tags: ['jobs'],
+          summary: 'Open and total counts for this board.',
+          responses: { 200: ok('Counts.') },
+        },
       },
       '/.well-known/agenticjobs': {
         get: {
@@ -874,7 +1147,8 @@ export function openApiDocument(config: Config): Record<string, unknown> {
             method: {
               type: 'string',
               nullable: true,
-              description: 'How it is settled: a coin (SOL, USDC, ETH, USDT, POL) or a rail (bank transfer, PayPal, payroll).',
+              description:
+                'How it is settled: a coin (SOL, USDC, ETH, USDT, POL) or a rail (bank transfer, PayPal, payroll).',
             },
             equity: { type: 'string', nullable: true },
             unpaid: { type: 'boolean' },
@@ -888,12 +1162,30 @@ export function openApiDocument(config: Config): Record<string, unknown> {
           properties: {
             type: {
               type: 'string',
-              enum: ['hourly', 'daily', 'weekly', 'monthly', 'yearly', 'fixed', 'per_task', 'per_unit', 'revenue_share', 'bounty'],
+              enum: [
+                'hourly',
+                'daily',
+                'weekly',
+                'monthly',
+                'yearly',
+                'fixed',
+                'per_task',
+                'per_unit',
+                'revenue_share',
+                'bounty',
+              ],
             },
             min: { type: 'number', nullable: true },
             max: { type: 'number', nullable: true },
-            currency: { type: 'string', description: 'USD, EUR, or a ticker such as SOL. "%" for a revenue share.' },
-            unit: { type: 'string', nullable: true, description: 'For per_task and per_unit: "task", "PR that fixes a bug you find".' },
+            currency: {
+              type: 'string',
+              description: 'USD, EUR, or a ticker such as SOL. "%" for a revenue share.',
+            },
+            unit: {
+              type: 'string',
+              nullable: true,
+              description: 'For per_task and per_unit: "task", "PR that fixes a bug you find".',
+            },
           },
         },
       },

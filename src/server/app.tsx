@@ -13,6 +13,11 @@ import type { Config } from '../config.ts';
 import { apiRoutes } from './routes/api.ts';
 import { settingsRoutes } from './routes/settings.ts';
 import { trackerRoutes } from './routes/tracker.tsx';
+import { agentRoutes } from './routes/agents.tsx';
+import { watchRoutes } from './routes/watches.tsx';
+import { rankingRoutes } from './routes/rankings.tsx';
+import { landingRoutes } from './routes/landing.tsx';
+import { createRankings } from '../core/rankings.ts';
 import { pageRoutes } from './routes/pages.tsx';
 import { inboxRoutes } from './routes/inbox.tsx';
 import { discoveryRoutes } from './routes/discovery.ts';
@@ -35,7 +40,7 @@ export function createApp(
   mailer: Mailer | null = createMailer(config),
   coinpay: CoinPayClient | null = config.coinpay === null ? null : createCoinPay(config.coinpay),
 ): Hono<AppEnv> {
-  const deps: Deps = { pool, config, mailer, coinpay };
+  const deps: Deps = { pool, config, mailer, coinpay, rankings: createRankings(pool, config) };
   const app = new Hono<AppEnv>();
 
   app.use('*', withViewer(deps));
@@ -52,6 +57,9 @@ export function createApp(
   // 404 for any /api/v1 path it does not know, this one included.
   app.route('/api/v1/settings', settingsRoutes());
   app.route('/', trackerRoutes());
+  app.route('/', agentRoutes());
+  app.route('/', watchRoutes());
+  app.route('/', rankingRoutes());
   app.route('/api/v1', apiRoutes());
   // The MCP tools call this same app, so the getter is resolved lazily: the
   // app does not exist yet at the point the routes are mounted on it.
@@ -63,6 +71,9 @@ export function createApp(
   app.route('/', discoveryRoutes());
   app.route('/', inboxRoutes());
   app.route('/', pageRoutes());
+  // Last, so `/rust/remote` is only a landing page when nothing else lives
+  // at that path.
+  app.route('/', landingRoutes());
 
   app.notFound((c) => {
     // A machine asking for JSON gets JSON. Handing an HTML 404 to a client

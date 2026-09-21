@@ -7,6 +7,8 @@ import { getCookie } from 'hono/cookie';
 import type { MiddlewareHandler } from 'hono';
 import { SESSION_COOKIE, viewerFromToken } from '../core/auth.ts';
 import { unreadThreads } from '../core/inbox.ts';
+import { unreadNotifications } from '../core/watches.ts';
+import { popularSkills } from '../core/skills.ts';
 import type { AppEnv, Deps } from './deps.ts';
 
 /**
@@ -26,6 +28,8 @@ export function withViewer(deps: Deps): MiddlewareHandler<AppEnv> {
     c.set('deps', deps);
     c.set('viewer', null);
     c.set('unread', 0);
+    c.set('alerts', 0);
+    c.set('skills', []);
 
     const header = c.req.header('authorization') ?? '';
     const bearer = /^Bearer\s+(.+)$/i.exec(header)?.[1]?.trim();
@@ -35,18 +39,29 @@ export function withViewer(deps: Deps): MiddlewareHandler<AppEnv> {
       return;
     }
 
+    const page = !c.req.path.startsWith('/api/') && !c.req.path.startsWith('/assets/');
     const cookie = getCookie(c, SESSION_COOKIE);
     if (cookie !== undefined && cookie !== '') {
       const viewer = await viewerFromToken(deps.pool, cookie);
       c.set('viewer', viewer);
-      // The nav's unread count, for a person on a page. One indexed query, and
-      // only on the surface that has a nav: an API call has nowhere to show it.
-      if (
-        viewer !== null &&
-        !c.req.path.startsWith('/api/') &&
-        !c.req.path.startsWith('/assets/')
-      ) {
-        c.set('unread', await unreadThreads(deps.pool, viewer.id));
+      // The nav's unread counts, for a person on a page. Two indexed queries,
+      // and only on the surface that has a nav: an API call has nowhere to
+      // show them.
+      if (viewer !== null && page) {
+        const [unread, alerts] = await Promise.all([
+          unreadThreads(deps.pool, viewer.id),
+          unreadNotifications(deps.pool, viewer.id),
+        ]);
+        c.set('unread', unread);
+        c.set('alerts', alerts);
+      }
+    }
+    if (page) {
+      // The footer's skill links. Cached in process, so this is a lookup.
+      try {
+        c.set('skills', await popularSkills(deps.pool));
+      } catch {
+        // A footer with no skill links is a footer, not an outage.
       }
     }
     await next();

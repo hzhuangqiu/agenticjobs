@@ -24,6 +24,8 @@ import { AuthorSocial, type SocialProps } from './updates.tsx';
 import { RecommendationList, RecommendForm, type RecommendFormProps } from './recommendations.tsx';
 import type { Recommendation } from '../core/recommendations.ts';
 import { MessageButton } from './inbox.tsx';
+import { pathForQuery } from '../core/landing.ts';
+import { isWatchable, watchQuery } from '../core/watches.ts';
 
 /**
  * Where a tag points when there is no search to add it to.
@@ -337,19 +339,84 @@ export const InstallStrip: FC<{ publicUrl: string }> = ({ publicUrl }) => (
   </div>
 );
 
+/**
+ * The Watch button, and the permalink when the search has one.
+ *
+ * A plain form, so it works with the script blocked: the query travels as
+ * its querystring form and the server parses it the way the page did.
+ */
+export const WatchControls: FC<{ query: JobQuery; signedIn: boolean }> = ({ query, signedIn }) => {
+  if (!isWatchable(query)) return null;
+  const params = queryToParams(watchQuery(query));
+  const permalink = pathForQuery(query);
+  return (
+    <>
+      {signedIn ? (
+        <form method="post" action="/notifications/watches" style="display:inline">
+          <input type="hidden" name="query" value={params.toString()} />
+          <button
+            class="btn btn-secondary btn-sm"
+            type="submit"
+            title="Email and notify me when a listing matching this search is published"
+          >
+            Watch this search
+          </button>
+        </form>
+      ) : (
+        <a
+          class="btn btn-secondary btn-sm"
+          href={`/login?next=${encodeURIComponent(permalink ?? `/?${params.toString()}`)}`}
+          title="Sign in to be told when a listing matching this search is published"
+        >
+          Watch this search
+        </a>
+      )}
+      {permalink !== null && (
+        <a class="small" href={permalink} title="This search, as a page you can link to">
+          {permalink}
+        </a>
+      )}
+    </>
+  );
+};
+
 export const JobList: FC<{
   page: JobPage<Job>;
   query: JobQuery;
   boardName: string;
   tagline: string;
   publicUrl: string;
-}> = ({ page, query, boardName, tagline, publicUrl }) => (
+  /** A landing page's own heading and intro; the board's when absent. */
+  heading?: string;
+  intro?: string;
+  /** Where the pages of this list live: `/rust/remote`, or `/`. */
+  base?: string;
+  signedIn?: boolean;
+}> = ({
+  page,
+  query,
+  boardName,
+  tagline,
+  publicUrl,
+  heading,
+  intro,
+  base = '/',
+  signedIn = false,
+}) => (
   <div class="stack">
     <div>
-      <h1>{boardName}</h1>
-      <p class="lede">{tagline}</p>
+      <h1>{heading ?? boardName}</h1>
+      <p class="lede">{intro ?? tagline}</p>
     </div>
     <Filters query={query} />
+    {heading !== undefined && (
+      <p class="row" style="align-items:center;flex-wrap:wrap;gap:.5rem">
+        <WatchControls query={query} signedIn={signedIn} />
+        <a class="small" href={feedHref(query)}>
+          Subscribe
+        </a>
+      </p>
+    )}
     {/*
      * Every filter, not only the tags. "Filtering by" rather than "Tagged"
      * because a workplace and a salary floor are not tags, and calling them
@@ -369,6 +436,7 @@ export const JobList: FC<{
         <a class="small" href={feedHref(query)}>
           Subscribe
         </a>
+        {heading === undefined && <WatchControls query={query} signedIn={signedIn} />}
       </p>
     )}
     <InstallStrip publicUrl={publicUrl} />
@@ -387,7 +455,7 @@ export const JobList: FC<{
         ))}
       </ul>
     )}
-    <Pagination page={page} query={query} />
+    <Pagination page={page} query={query} base={base} />
     <p class="small muted">
       This search is a feed: <a href="/feed">/feed</a>, and <code>/feed?tags=react,go</code> for any
       set of tags. People are at <a href="/candidates">/candidates</a>, with{' '}
