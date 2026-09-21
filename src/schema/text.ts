@@ -20,6 +20,11 @@
  * escape sequence, so keeping it costs none of the safety this scan exists
  * for. Everything else below 0x20, the ESC that starts an ANSI sequence
  * included, still becomes a space.
+ *
+ * The C1 controls (0x80-0x9f) go the same way: CSI and OSC at 0x9b and 0x9d
+ * are single-byte escape initiators that bypass the ESC strip entirely.
+ * Invisible format characters are dropped rather than spaced - see
+ * `isFormat`.
  */
 export function clean(value: unknown, max: number, options: { multiline?: boolean } = {}): string {
   if (typeof value !== 'string') return '';
@@ -28,9 +33,29 @@ export function clean(value: unknown, max: number, options: { multiline?: boolea
   for (const char of source) {
     const code = char.codePointAt(0) ?? 0;
     const keep = options.multiline === true && code === 0x0a;
-    out += !keep && (code < 0x20 || code === 0x7f) ? ' ' : char;
+    if (!keep && isFormat(char, code)) continue;
+    out += !keep && (code < 0x20 || (code >= 0x7f && code <= 0x9f)) ? ' ' : char;
   }
   return out.trim().slice(0, max);
+}
+
+const FORMAT = /\p{Cf}/u;
+
+/**
+ * A Unicode format character carries no visible content of its own: the
+ * bidirectional overrides and isolates that reverse what a reader sees, the
+ * zero-width characters, and the tag characters that encode ASCII invisibly -
+ * the channel used to hide instructions in text an agent reads, on a board
+ * built for agents to read listings.
+ *
+ * They are removed rather than spaced, because one inside a word is not a
+ * space: "wor\u200bd" must come out "word", not "wor d". The two exceptions
+ * are the joiners real typography needs - ZWJ for emoji sequences and ZWNJ
+ * for Persian and Indic scripts - which are how text is correctly written
+ * rather than hidden content.
+ */
+function isFormat(char: string, code: number): boolean {
+  return code !== 0x200c && code !== 0x200d && FORMAT.test(char);
 }
 
 export function slugify(value: string): string {

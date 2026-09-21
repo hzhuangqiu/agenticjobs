@@ -111,6 +111,31 @@ test('a bare url becomes a link, and a trailing full stop stays outside it', () 
   assert.ok(html.endsWith('.'), html);
 });
 
+test('a query string in a link target is not double-escaped', () => {
+  const html = renderInline('[jobs](https://example.com/?a=1&b=2)');
+  assert.ok(html.includes('href="https://example.com/?a=1&amp;b=2"'), html);
+  assert.ok(!html.includes('&amp;amp;'), html);
+});
+
+test('a query string in a bare url is not double-escaped', () => {
+  const html = renderInline('see https://example.com/?a=1&b=2 now');
+  assert.ok(html.includes('href="https://example.com/?a=1&amp;b=2"'), html);
+  assert.ok(!html.includes('&amp;amp;'), html);
+});
+
+test('a query string in an image source is not double-escaped', () => {
+  const html = renderInline('![chart](https://example.com/i.png?w=100&h=50)');
+  assert.ok(html.includes('src="https://example.com/i.png?w=100&amp;h=50"'), html);
+  assert.ok(!html.includes('&amp;amp;'), html);
+});
+
+test('a literal entity in a link target decodes exactly once', () => {
+  const html = renderInline('[x](https://example.com/?a=1&amp;b=2)');
+  // The source held the text "&amp;", which round-trips as &amp;amp; — the
+  // browser decodes it back to the address the author wrote.
+  assert.ok(html.includes('href="https://example.com/?a=1&amp;amp;b=2"'), html);
+});
+
 test('images can be forced to links, for documents strangers read', () => {
   const plain = renderInline('![alt](https://example.com/a.png)');
   assert.ok(plain.includes('<img'), plain);

@@ -213,15 +213,23 @@ function readMoney(text: string, at: number): Money | null {
   let end = at + match[0].length;
   let currency: string | null = null;
   if (symbolBefore !== undefined) currency = SYMBOL_TO_CODE[symbolBefore] ?? null;
-  if (currency === null && codeBefore !== undefined) {
-    currency = codeFrom(codeBefore);
+  if (codeBefore !== undefined) {
+    const code = codeFrom(codeBefore);
     // A leading word that is not a code is not part of the amount at all.
-    if (currency === null) return null;
+    if (code === null || (currency !== null && currency !== code)) return null;
+    currency ??= code;
   }
-  if (currency === null && symbolAfter !== undefined) currency = SYMBOL_TO_CODE[symbolAfter] ?? null;
+  if (symbolAfter !== undefined) {
+    const code = SYMBOL_TO_CODE[symbolAfter] ?? null;
+    if (currency !== null && currency !== code) return null;
+    currency ??= code;
+  }
   if (codeAfter !== undefined) {
     const code = codeFrom(codeAfter);
     if (code !== null) {
+      // Every symbol or code attached to one amount must agree.
+      // Otherwise "USD 100 EUR" or "$100 EUR" silently loses a currency.
+      if (currency !== null && currency !== code) return null;
       currency ??= code;
     } else {
       // "per", "an", "fixed": give the word back to the rest of the line.
@@ -631,6 +639,21 @@ function lineFromObject(value: Record<string, unknown>): PayLine | string {
 }
 
 /**
+ * A settlement clause standing on its own - "settled in SOL" as its own line
+ * or "via bank transfer" as its own array entry - names the rail for the
+ * whole pay, not a price. A person splitting a listing into one clause per
+ * line writes it this way, and the `;` the multi-line string is split on is
+ * the same mark the clause itself tolerates in front of it.
+ */
+function standaloneMethod(item: unknown): string | null {
+  if (typeof item !== 'string') return null;
+  const settled = SETTLED.exec(item.trim());
+  if (settled === null || settled.index !== 0) return null;
+  const named = normaliseMethod(settled[1]);
+  return named !== null && (isKnownCurrency(named) || isRail(named)) ? named : null;
+}
+
+/**
  * Pay, from whatever a form, an API client or a model sent.
  *
  * `pay` may be a string (one line, or several separated by newlines), an
@@ -673,6 +696,11 @@ export function normalisePay(input: Record<string, unknown>): Pay | string {
     if (typeof item === 'object' && item !== null) {
       const object = item as Record<string, unknown>;
       if (typeof object['text'] === 'string') {
+        const clause = standaloneMethod(object['text']);
+        if (clause !== null) {
+          namedMethod ??= clause;
+          continue;
+        }
         const read = readPayLine(object['text']);
         if (typeof read === 'string') return read;
         lines.push(read.line);
@@ -682,6 +710,11 @@ export function normalisePay(input: Record<string, unknown>): Pay | string {
       const line = lineFromObject(object);
       if (typeof line === 'string') return line;
       lines.push(line);
+      continue;
+    }
+    const clause = standaloneMethod(item);
+    if (clause !== null) {
+      namedMethod ??= clause;
       continue;
     }
     const read = readPayLine(item);

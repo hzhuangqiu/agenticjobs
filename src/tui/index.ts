@@ -27,6 +27,7 @@ import {
   selectedDraft,
   selectedJob,
   selectedThread,
+  type ApplicationRow,
   type DraftRow,
   type Prompt,
   type TuiState,
@@ -297,7 +298,7 @@ export async function startTui(client: BoardClient): Promise<void> {
       return;
     }
     if (key === '/') {
-      invalidate({ ...state, editing: true, tab: 'find', detail: null, query: '' });
+      invalidate({ ...state, editing: true, tab: 'find', detail: null, applications: null, query: '' });
       return;
     }
     if (key === 'tab') {
@@ -324,7 +325,11 @@ export async function startTui(client: BoardClient): Promise<void> {
     }
 
     if (state.detail !== null) {
-      if (key === 'a' || key === 'd') await apply(state.detail, key === 'd');
+      // The applications view reuses detail; applying to your own listing from
+      // it must stay impossible, matching the hidden `a`/`d` hints.
+      if (state.applications === null && (key === 'a' || key === 'd')) {
+        await apply(state.detail, key === 'd');
+      }
       return;
     }
     if (state.thread !== null) {
@@ -373,9 +378,25 @@ export async function startTui(client: BoardClient): Promise<void> {
   };
 
   const activate = async (): Promise<void> => {
-    if (state.tab === 'find' || state.tab === 'listings') {
+    if (state.tab === 'find') {
       const job = selectedJob(state);
-      if (job !== null) invalidate({ ...state, detail: job, message: null });
+      if (job !== null) invalidate({ ...state, detail: job, applications: null, message: null });
+      return;
+    }
+    if (state.tab === 'listings') {
+      const job = selectedJob(state);
+      if (job === null) return;
+      // The help bar promises applications here, and reading what came back is
+      // the point of posting: open the listing's applications, not an apply
+      // form against your own listing.
+      const result = await busy('reading applications', () => client.applications(job.slug));
+      if (result === null) return;
+      invalidate({
+        ...state,
+        detail: job,
+        applications: result.items as ApplicationRow[],
+        message: null,
+      });
       return;
     }
     if (state.tab === 'inbox') {
@@ -445,6 +466,7 @@ export async function startTui(client: BoardClient): Promise<void> {
     invalidate({
       ...state,
       detail: null,
+      applications: null,
       message: draft
         ? `Prepared for ${job.title}. Read it on the Drafts tab and send it there.`
         : `Applied to ${job.title}.`,

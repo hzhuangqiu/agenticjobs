@@ -301,8 +301,11 @@ export function renderInline(source: string, options: MarkdownOptions = {}): str
   // the end of a sentence is the common case and the full stop is not part of
   // it.
   text = text.replace(/(^|[\s(])(https?:\/\/[^\s<>"']+)/g, (_whole, lead: string, href: string) => {
-    const trimmed = href.replace(/[.,;:!?)]+$/, '');
-    const tail = href.slice(trimmed.length);
+    // The match ran on escaped text, so decode before trimming: an entity's
+    // own `;` would otherwise count as trailing punctuation and corrupt it.
+    const decoded = unescapeUrl(href);
+    const trimmed = decoded.replace(/[.,;:!?)]+$/, '');
+    const tail = decoded.slice(trimmed.length);
     const url = safeUrl(trimmed);
     if (url === null) return `${lead}${href}`;
     return `${lead}<a href="${escapeHtml(url)}" rel="${rel}">${escapeHtml(trimmed)}</a>${tail}`;
@@ -321,9 +324,26 @@ export function renderInline(source: string, options: MarkdownOptions = {}): str
   });
 }
 
-/** Only `\(` and `\)` matter inside a link target. */
+const HTML_UNESCAPES: Record<string, string> = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  '#39': "'",
+};
+
+/**
+ * Hrefs are captured after escapeHtml, so every `&` in the source arrives as
+ * `&amp;`. Emitted like that it would be escaped a second time — `&amp;amp;`
+ * decodes back to `&amp;`, and a query like `?a=1&b=2` reaches the server as
+ * one parameter instead of two. Decode the five entities escapeHtml produces
+ * in a single pass; matching `&amp;` in the alternation keeps a literal `&lt;`
+ * in the source as `&lt;` rather than decoding it twice to `<`.
+ */
 function unescapeUrl(href: string): string {
-  return href.replace(/\\([()])/g, '$1');
+  return href
+    .replace(/\\([()])/g, '$1')
+    .replace(/&(amp|lt|gt|quot|#39);/g, (whole, entity: string) => HTML_UNESCAPES[entity] ?? whole);
 }
 
 /** Plain text, for meta descriptions, feeds, the TUI and search snippets. */
