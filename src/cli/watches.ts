@@ -82,14 +82,25 @@ export async function runNotifications(
   out: (human: string, machine: unknown) => number,
 ): Promise<number> {
   const unreadOnly = flagBool(args, 'unread');
-  const result = await client.notifications({ unreadOnly });
-  if (flagBool(args, 'read')) await client.markNotificationsRead();
+  let result = await client.notifications({ unreadOnly });
+  let marked = 0;
+  if (flagBool(args, 'read')) {
+    ({ read: marked } = await client.markNotificationsRead());
+    const updated = await client.notifications();
+    const displayed = new Set(result.items.map((item) => item.id));
+    result = {
+      ...updated,
+      items: unreadOnly ? updated.items.filter((item) => displayed.has(item.id)) : updated.items,
+    };
+  }
   if (result.items.length === 0)
     return out(unreadOnly ? 'Nothing unread.' : 'No notifications yet.', result);
   const head =
-    result.unread === 0
-      ? ''
-      : `${bold(`${result.unread} unread`)}${flagBool(args, 'read') ? dim(', now marked read') : dim('  (--read marks them read)')}\n\n`;
+    marked > 0
+      ? `${bold(`${marked} unread`)}${dim(', now marked read')}\n\n`
+      : result.unread === 0
+        ? ''
+        : `${bold(`${result.unread} unread`)}${dim(flagBool(args, 'read') ? '  (new since marking read)' : '  (--read marks them read)')}\n\n`;
   return out(head + result.items.map(notificationLine).join('\n\n'), result);
 }
 
