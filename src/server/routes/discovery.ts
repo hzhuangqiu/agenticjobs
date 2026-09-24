@@ -525,7 +525,9 @@ export function discoveryRoutes(): Hono<AppEnv> {
     const months = await pool.query<{ month: string; latest: string }>(
       `select to_char(published_at, 'YYYY-MM') as month, max(published_at)::text as latest
          from jobs
-        where status = 'published' and published_at is not null
+        where status = 'published'
+          and published_at is not null and published_at <= now()
+          and (expires_at is null or expires_at > now())
         group by 1 order by 1 desc`,
     );
     const entries = months.rows
@@ -570,6 +572,7 @@ export function discoveryRoutes(): Hono<AppEnv> {
     const jobs = await pool.query<{ slug: string; updated_at: string }>(
       `select slug, updated_at from jobs
         where status = 'published' and published_at is not null
+          and published_at <= now() and (expires_at is null or expires_at > now())
           and to_char(published_at, 'YYYY-MM') = $1
         order by published_at desc limit 50000`,
       [name],

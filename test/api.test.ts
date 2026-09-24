@@ -705,6 +705,18 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       const expired = await createPublished(`Expired ${stamp}`, '2000-01-01T00:00:00.000Z');
       const live = await createPublished(`Live ${stamp}`, '2099-01-01T00:00:00.000Z');
 
+      // A published row can outlive its public listing. Keep it in a month
+      // with no other jobs so both the sitemap index and its monthly chunk
+      // prove they describe only URLs readers can open.
+      await pool.query(`update jobs set published_at = $2 where id = $1`, [
+        expired.id,
+        '1900-01-15T00:00:00.000Z',
+      ]);
+      const sitemapIndex = await (await get('/sitemap.xml')).text();
+      assert.ok(!sitemapIndex.includes('/sitemaps/1900-01.xml'));
+      const expiredMonth = await (await get('/sitemaps/1900-01.xml')).text();
+      assert.ok(!expiredMonth.includes(`/jobs/${expired.slug}`));
+
       const search = (await (await get(`/api/v1/jobs?org=${org.slug}&limit=100`)).json()) as {
         items: { slug: string }[];
       };
