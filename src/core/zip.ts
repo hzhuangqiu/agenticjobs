@@ -89,6 +89,11 @@ function readEntries(buffer: Buffer): Entry[] {
   return entries;
 }
 
+/** Whether a structurally valid archive contains a named entry. */
+export function hasZipEntry(buffer: Buffer, wanted: string): boolean {
+  return readEntries(buffer).some((entry) => entry.name === wanted);
+}
+
 export function readZipEntry(buffer: Buffer, wanted: string): Buffer | null {
   const entry = readEntries(buffer).find((item) => item.name === wanted);
   if (entry === undefined) return null;

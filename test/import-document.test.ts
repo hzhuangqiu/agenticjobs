@@ -32,3 +32,11 @@ test('a Word import preserves inline controls and decodes XML text exactly once'
     warnings: [],
   });
 });
+
+test('a Word resume still imports when its filename says PDF', async () => {
+  const bytes = await readFile(new URL('./fixtures/docx-inline-controls.docx', import.meta.url));
+  const result = await importDocument('resume.pdf', bytes, 'application/pdf');
+
+  assert.equal(result.via, 'docx');
+  assert.match(result.markdown, /Plain & escaped <text>/);
+});

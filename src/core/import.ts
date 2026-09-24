@@ -23,7 +23,7 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
-import { readZipEntry, ZipProblem } from './zip.ts';
+import { hasZipEntry, readZipEntry, ZipProblem } from './zip.ts';
 
 const run = promisify(execFile);
 
@@ -78,8 +78,17 @@ function classify(extension: string, mime: string, bytes: Buffer): Kind {
   // The magic bytes win over the extension. A resume renamed from .pdf to
   // .docx is a mistake someone makes once, and the file itself is not lying.
   if (bytes.subarray(0, 5).toString('latin1') === '%PDF-') return 'pdf';
-  if (bytes.subarray(0, 2).toString('latin1') === 'PK' && (extension === 'docx' || mime.includes('wordprocessingml'))) {
-    return 'docx';
+  if (bytes.subarray(0, 2).toString('latin1') === 'PK') {
+    if (extension === 'docx' || mime.includes('wordprocessingml')) return 'docx';
+    // Word documents are ZIP archives. A renamed .docx still identifies
+    // itself through its document entry, even when the extension and browser
+    // MIME type describe something else.
+    try {
+      if (hasZipEntry(bytes, 'word/document.xml')) return 'docx';
+    } catch {
+      // An unrelated or malformed ZIP is not a Word document; keep checking
+      // the filename and MIME type below for the useful import error.
+    }
   }
   if (['md', 'markdown', 'mdown', 'mkd'].includes(extension)) return 'markdown';
   if (extension === 'txt' || mime === 'text/plain') return 'text';
