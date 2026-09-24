@@ -154,7 +154,10 @@ export function openApiDocument(config: Config): Record<string, unknown> {
             param('workplace', 'remote, hybrid, onsite'),
             param('seniority', 'intern, junior, mid, senior, staff, principal, lead'),
             param('agentPolicy', 'welcome, disclose, human-only'),
-            param('tag', 'Repeatable. Matches tags and stack.'),
+            param(
+              'tag',
+              'Repeatable, or comma-separated as tags=. Every requested tag must occur in tags or stack.',
+            ),
             param(
               'salaryMin',
               'Minimum annualised salary, compared against the top of each range.',

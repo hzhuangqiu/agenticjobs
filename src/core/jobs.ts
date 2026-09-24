@@ -264,9 +264,16 @@ function conditions(
   }
   if (query.tags.length > 0) {
     params.push(query.tags);
-    // Matching either list means "python" finds a job that called it a tag and
-    // one that called it part of the stack.
-    where.push(`(j.tags && $${params.length}::text[] or j.stack && $${params.length}::text[])`);
+    // Every requested skill narrows the search, whether a listing put it in
+    // tags or stack. A single array-overlap test made `rust,typescript` mean
+    // either skill and returned unrelated jobs from a search that looked exact.
+    where.push(
+      `((j.tags && $${params.length}::text[]) or (j.stack && $${params.length}::text[]))
+       and not exists (
+         select 1 from unnest($${params.length}::text[]) as requested(tag)
+          where not (requested.tag = any(j.tags) or requested.tag = any(j.stack))
+       )`,
+    );
   }
   if (query.salaryMin !== null) {
     params.push(query.salaryMin);

@@ -3288,6 +3288,49 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       assert.ok(comma.total > 0, `expected ${tag} to match something`);
     });
 
+    test('multiple job tags narrow across both tags and stack', async () => {
+      if (pool === null) return;
+      const { createSession } = await import('../dist/core/auth.js');
+      const owner = await pool.query(`select user_id from memberships limit 1`);
+      const token = await createSession(pool as never, owner.rows[0]?.['user_id'], { label: 't' });
+      const auth = { authorization: `Bearer ${token}` };
+      const stamp = Date.now().toString(36);
+      const first = `need-a-${stamp}`;
+      const second = `need-b-${stamp}`;
+      const postPublished = async (title: string, tags: string[], stack: string[]) => {
+        const response = await post(
+          '/api/v1/jobs',
+          {
+            org: 'example-works',
+            title: `${title} ${stamp}`,
+            description: 'A paid listing used to check combined skill filtering.',
+            agentPolicy: 'welcome',
+            tags,
+            stack,
+            pay: ['$1 per task'],
+            payMethod: 'SOL',
+            publish: true,
+          },
+          auth,
+        );
+        const body = await response.text();
+        assert.equal(response.status, 201, body);
+        return (JSON.parse(body) as { job: { slug: string } }).job.slug;
+      };
+
+      const matching = await postPublished('Both skills', [first], [second]);
+      await postPublished('Only first skill', [first], []);
+      await postPublished('Only second skill', [], [second]);
+
+      const page = (await (
+        await get(`/api/v1/jobs?org=example-works&tags=${first},${second}&limit=100`)
+      ).json()) as { items: { slug: string }[] };
+      assert.deepEqual(
+        page.items.map((job) => job.slug),
+        [matching],
+      );
+    });
+
     test('one query, every representation', async () => {
       // A filter written once should work whichever way you read the board.
       // /jobs.rss and /feed.rss built their query from an EMPTY
