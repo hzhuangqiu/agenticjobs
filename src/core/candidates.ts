@@ -10,7 +10,12 @@
 import type { Resume } from './resumes.ts';
 import type { CandidateSummary } from '../views/candidates.tsx';
 import { parseCapacity } from './capacity.ts';
-import { type OpenResume, parseResume, redactContactChannels } from '../markup/resume.ts';
+import {
+  type OpenResume,
+  hasContactChannel,
+  parseResume,
+  redactContactChannels,
+} from '../markup/resume.ts';
 
 /** Contact keys that read as a place rather than an address. */
 const LOCATION_KEYS = /^(location|based|city|where|region)$/i;
@@ -87,19 +92,12 @@ function plainName(value: string): string {
 }
 
 /**
- * "Looks like an email address", loosely — the check a public field needs,
- * not a validator. Used anywhere directory text could carry a channel.
- */
-const HAS_ADDRESS = /[^\s@]+@[^\s@]+\.[^\s@]+/;
-
-/**
  * The name shown in the directory.
  *
  * A resume with no usable h1 falls back to its title, which its owner wrote
- * and which is at least theirs. It never falls back to an email address:
- * publishing a resume should not mean publishing an address as the headline.
- * An h1 is free text, so "Jane Doe jane@example.com" is a name the parser
- * returns without complaint — the address check has to live here, on the
+ * and which is at least theirs. It never falls back to a contact channel:
+ * publishing a resume should not mean publishing an address or phone number
+ * as the headline. An h1 is free text, so the check has to live here, on the
  * field, the same way it does for the headline.
  */
 export function nameOf(resume: Resume): string {
@@ -109,12 +107,12 @@ export function nameOf(resume: Resume): string {
     parsed !== undefined &&
     parsed !== '' &&
     parsed.length <= NAME_MAX &&
-    !HAS_ADDRESS.test(parsed)
+    !hasContactChannel(parsed)
   ) {
     return parsed;
   }
   const title = resume.title.trim();
-  return title === '' || title.length > NAME_MAX || HAS_ADDRESS.test(title)
+  return title === '' || title.length > NAME_MAX || hasContactChannel(title)
     ? 'Candidate'
     : title;
 }
@@ -167,15 +165,15 @@ export function resumeForViewer(
  * A backfill would repair those rows, but it would not stop the next one: any
  * resume saved by an older build, restored from a backup, or written straight
  * into the column arrives here the same way. This is a public directory page
- * and the field is one line of text, so it is checked on the way out. Cheap,
- * and it cannot go stale.
+ * and the field is one line of text, so it is checked for contact channels on
+ * the way out. Cheap, and it cannot go stale.
  */
 function headlineOf(resume: Resume): string | null {
   const headline = resume.parsed?.headline;
   if (headline === null || headline === undefined) return null;
   const cleaned = headline.replace(/\*\*|__/g, '').trim();
   if (cleaned === '') return null;
-  return HAS_ADDRESS.test(cleaned) ? null : cleaned;
+  return hasContactChannel(cleaned) ? null : cleaned;
 }
 
 export function toCandidateSummary(resume: Resume): CandidateSummary {

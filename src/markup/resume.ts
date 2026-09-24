@@ -479,6 +479,14 @@ const EMAIL_IN_TEXT = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
 const PHONE_IN_TEXT =
   /(?:\+\d[\d ()./-]{6,}\d|\(\d{3}\)[\d ()./-]{5,}\d|\b\d{3}[-.\s]\d{3}[-.\s]\d{4}\b)/g;
 
+/** Whether plain summary text contains a channel the public resume withholds. */
+export function hasContactChannel(text: string): boolean {
+  return (
+    new RegExp(EMAIL_IN_TEXT.source).test(text) ||
+    new RegExp(PHONE_IN_TEXT.source).test(text)
+  );
+}
+
 /**
  * The contact block, minus every way to actually reach the person.
  *

@@ -218,6 +218,56 @@ test('a name holding an address is dropped on the directory card', () => {
   assert.equal(summary.name, 'Jane Doe');
 });
 
+test('a phone in the name line is dropped on the directory card', () => {
+  const summary = toCandidateSummary({
+    id: 'r1',
+    userId: 'u1',
+    slug: 'jane',
+    title: 'Jane Doe',
+    markdown: '# x\n',
+    parsed: {
+      name: 'Jane Doe +1 (408) 555-0100',
+      headline: null,
+      contact: [],
+      sections: [],
+      markdown: '',
+      warnings: [],
+    },
+    visibility: 'public',
+    publicSlug: 'jane',
+    sourceName: null,
+    createdAt: '2026-09-09T00:00:00.000Z',
+    updatedAt: '2026-09-09T00:00:00.000Z',
+  } as never);
+
+  assert.equal(summary.name, 'Jane Doe');
+});
+
+test('a phone in the headline is dropped from the directory card', () => {
+  const summary = toCandidateSummary({
+    id: 'r1',
+    userId: 'u1',
+    slug: 'jane',
+    title: 'Jane Doe',
+    markdown: '# Jane Doe\n',
+    parsed: {
+      name: 'Jane Doe',
+      headline: 'Call me at +1 (408) 555-0100',
+      contact: [],
+      sections: [],
+      markdown: '',
+      warnings: [],
+    },
+    visibility: 'public',
+    publicSlug: 'jane',
+    sourceName: null,
+    createdAt: '2026-09-09T00:00:00.000Z',
+    updatedAt: '2026-09-09T00:00:00.000Z',
+  } as never);
+
+  assert.equal(summary.headline, null);
+});
+
 test('a title holding an address is not the fallback either', () => {
   const name = nameOf({
     id: 'r1',
