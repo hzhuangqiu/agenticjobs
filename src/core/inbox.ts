@@ -193,47 +193,53 @@ export async function startThread(
   }
 
   const jobId = input.jobId ?? null;
-
-  // Find the existing conversation between these parties about this listing.
-  // "These parties" includes which identity the sender is using: a member of
-  // two employers has one row per thread, and `me.org_id` says whether that
-  // row is them personally or them speaking for one employer. Matching only
-  // on `me.user_id` would deliver a message written as Org B into a thread
-  // with Org A, shown to the other side as Org A and readable by Org A's
-  // members - and a personal message into an employer's thread the same way.
-  const existing = await pool.query<{ id: string }>(
-    `select t.id from threads t
-      where t.job_id is not distinct from $3
-        and exists (select 1 from thread_participants me
-                     where me.thread_id = t.id and me.user_id = $1
-                       and me.org_id is not distinct from $4)
-        and exists (select 1 from thread_participants them
-                     where them.thread_id = t.id
-                       and ${to.kind === 'candidate' ? 'them.user_id = $2 and them.org_id is null' : 'them.org_id = $2'})
-      order by t.last_message_at desc limit 1`,
-    [senderId, to.kind === 'candidate' ? to.userId : to.orgId, jobId, asOrg],
-  );
-  const found = existing.rows[0];
-  if (found !== undefined) {
-    const message = await sendMessage(pool, found.id, senderId, body);
-    if (typeof message === 'string') return message;
-    return { threadId: found.id, messageId: message.id, created: false };
-  }
-
-  // The limit is on *new* conversations: replying in one you already have is
-  // never what a spammer is doing.
-  const recent = await pool.query<{ count: number }>(
-    `select count(*)::int as count from threads
-      where created_by = $1 and created_at > now() - interval '1 day'`,
-    [senderId],
-  );
-  if ((recent.rows[0]?.count ?? 0) >= DAILY_THREADS) {
-    return `That is ${DAILY_THREADS} new conversations today. Reply in one you have, or come back tomorrow.`;
-  }
-
+  const senderParty = asOrg === null ? `candidate:${senderId}` : `employer:${asOrg}`;
+  const recipientParty =
+    to.kind === 'candidate' ? `candidate:${to.userId}` : `employer:${to.orgId}`;
+  const conversationKey = JSON.stringify([jobId, ...[senderParty, recipientParty].sort()]);
   const client = await pool.connect();
   try {
     await client.query('begin');
+    // Two first messages can otherwise both miss the lookup below and create
+    // duplicate threads. Lock the conversation identity before checking it.
+    await client.query('select pg_advisory_xact_lock(hashtextextended($1, 0))', [conversationKey]);
+
+    // Find the existing conversation between these parties about this listing.
+    // "These parties" includes which identity the sender is using: a member of
+    // two employers has one row per thread, and `me.org_id` says whether that
+    // person is themself or speaking for one employer.
+    const existing = await client.query<{ id: string }>(
+      `select t.id from threads t
+        where t.job_id is not distinct from $3
+          and exists (select 1 from thread_participants me
+                       where me.thread_id = t.id and me.user_id = $1
+                         and me.org_id is not distinct from $4)
+          and exists (select 1 from thread_participants them
+                       where them.thread_id = t.id
+                         and ${to.kind === 'candidate' ? 'them.user_id = $2 and them.org_id is null' : 'them.org_id = $2'})
+        order by t.last_message_at desc limit 1`,
+      [senderId, to.kind === 'candidate' ? to.userId : to.orgId, jobId, asOrg],
+    );
+    const found = existing.rows[0];
+    if (found !== undefined) {
+      await client.query('commit');
+      const message = await sendMessage(pool, found.id, senderId, body);
+      if (typeof message === 'string') return message;
+      return { threadId: found.id, messageId: message.id, created: false };
+    }
+
+    // The limit is on new conversations: replying in one you have is never
+    // what a spammer is doing.
+    const recent = await client.query<{ count: number }>(
+      `select count(*)::int as count from threads
+        where created_by = $1 and created_at > now() - interval '1 day'`,
+      [senderId],
+    );
+    if ((recent.rows[0]?.count ?? 0) >= DAILY_THREADS) {
+      await client.query('rollback');
+      return `That is ${DAILY_THREADS} new conversations today. Reply in one you have, or come back tomorrow.`;
+    }
+
     const thread = await client.query<{ id: string }>(
       `insert into threads (subject, job_id, created_by) values ($1, $2, $3) returning id`,
       [subject === '' ? preview(body).slice(0, SUBJECT_MAX) : subject, jobId, senderId],

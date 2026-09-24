@@ -42,11 +42,17 @@ function makePool() {
     }[],
   };
   let serial = 0;
+  let lockQueue: Promise<void> = Promise.resolve();
   const nextId = () => `00000000-0000-4000-8000-${String(++serial).padStart(12, '0')}`;
   const now = () => ++serial + 1_000_000;
 
-  const query = async (sql: string, params: unknown[] = []) => {
-    if (sql === 'begin' || sql === 'commit' || sql === 'rollback') return { rows: [] };
+  const query = async (sql: string, params: unknown[] = [], unlock?: () => void) => {
+    if (sql === 'begin') return { rows: [] };
+    if (sql === 'commit' || sql === 'rollback') {
+      unlock?.();
+      return { rows: [] };
+    }
+    if (sql.includes('pg_advisory_xact_lock')) return { rows: [] };
 
     // sendMessage's CTE: insert + touch last_message_at + mark sender read.
     if (sql.includes('with m as (')) {
@@ -180,7 +186,24 @@ function makePool() {
 
   const pool = {
     query,
-    connect: async () => ({ query, release: () => {} }),
+    connect: async () => {
+      let unlock: (() => void) | undefined;
+      return {
+        query: async (sql: string, params: unknown[] = []) => {
+          if (sql.includes('pg_advisory_xact_lock')) {
+            const previous = lockQueue;
+            let release!: () => void;
+            lockQueue = new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            await previous;
+            unlock = release;
+          }
+          return query(sql, params, unlock);
+        },
+        release: () => unlock?.(),
+      };
+    },
   };
   return { pool, model };
 }
@@ -277,6 +300,35 @@ test('writing as the employer the thread is with still finds it', async () => {
   if (typeof reply === 'string') return;
   assert.equal(reply.created, false);
   assert.equal(reply.threadId, first.threadId);
+});
+
+test('concurrent first messages for the same parties and job share one thread', async () => {
+  const { pool, model } = makePool();
+  seed({ pool, model });
+
+  const results = await Promise.all([
+    startThread(pool as never, carol, { kind: 'employer', orgId: orgA }, {
+      subject: 'About the platform role',
+      body: 'I would like to discuss this role.',
+      jobId: 'cccccccc-0000-4000-8000-000000000001',
+    }),
+    startThread(pool as never, carol, { kind: 'employer', orgId: orgA }, {
+      subject: 'About the platform role',
+      body: 'I would like to discuss this role.',
+      jobId: 'cccccccc-0000-4000-8000-000000000001',
+    }),
+  ]);
+
+  assert.equal(model.threads.length, 1);
+  assert.equal(
+    new Set(results.map((result) => (typeof result === 'string' ? result : result.threadId))).size,
+    1,
+  );
+  assert.deepEqual(
+    results.map((result) => (typeof result === 'string' ? null : result.created)).sort(),
+    [false, true],
+  );
+  assert.equal(model.messages.length, 2);
 });
 
 test('a body-derived subject never carries a lone surrogate into the insert', async () => {
