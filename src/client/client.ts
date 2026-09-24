@@ -371,6 +371,11 @@ export class BoardClient {
     return (await this.me()).orgs;
   }
 
+  /** Every listing this account can manage, including drafts and closed jobs. */
+  async myJobs(): Promise<{ items: Job[]; total: number }> {
+    return this.request('GET', '/api/v1/me/jobs');
+  }
+
   async createOrg(input: Record<string, unknown>): Promise<{ org: Organisation }> {
     return this.request('POST', '/api/v1/orgs', input);
   }

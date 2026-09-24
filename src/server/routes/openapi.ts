@@ -404,6 +404,14 @@ export function openApiDocument(config: Config): Record<string, unknown> {
           responses: { 200: ok('The caller.'), 401: err() },
         },
       },
+      '/api/v1/me/jobs': {
+        get: {
+          tags: ['jobs'],
+          summary: 'Your organization listings, including drafts and closed jobs.',
+          security: [{ bearer: [] }],
+          responses: { 200: ok('items: Job[], total.'), 401: err() },
+        },
+      },
       '/api/v1/candidates': {
         get: {
           tags: ['candidates'],

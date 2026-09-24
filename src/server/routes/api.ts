@@ -46,6 +46,7 @@ import {
   insertJob,
   getJobBySlug,
   getJobBySourceUrl,
+  listJobsForUser,
   normaliseInput,
   publishProblem,
   searchJobs,
@@ -830,6 +831,14 @@ export function apiRoutes(): Hono<AppEnv> {
         updatedAt: resume.updatedAt,
       })),
     });
+  });
+
+  api.get('/me/jobs', async (c) => {
+    const viewer = viewerOf(c);
+    if (viewer === null) return fail(c, 401, 'unauthenticated', 'Sign in to read your listings.');
+    c.header('cache-control', 'private, no-store');
+    const items = await listJobsForUser(c.get('deps').pool, viewer.id);
+    return c.json({ items, total: items.length });
   });
 
   api.get('/resumes', async (c) => {

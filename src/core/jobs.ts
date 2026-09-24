@@ -323,6 +323,18 @@ export async function searchJobs(
   };
 }
 
+/** Every listing the signed-in user can manage, including drafts and closed jobs. */
+export async function listJobsForUser(pool: pg.Pool, userId: string): Promise<Job[]> {
+  const rows = await pool.query<JobRow>(
+    `${SELECT}
+      join memberships m on m.org_id = j.org_id
+      where m.user_id = $1
+      order by j.updated_at desc, j.created_at desc`,
+    [userId],
+  );
+  return rows.rows.map(toJob);
+}
+
 /**
  * Does one published listing satisfy a query?
  *

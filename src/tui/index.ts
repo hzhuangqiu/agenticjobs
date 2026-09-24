@@ -84,17 +84,9 @@ export async function startTui(client: BoardClient): Promise<void> {
 
   const loadListings = async (): Promise<void> => {
     if (!state.canPost) return;
-    const me = await busy('loading listings', () => client.me());
-    if (me === null) return;
-    const slugs = new Set(me.orgs.map((org) => org.slug));
-    const pages = await Promise.all(
-      me.orgs.map((org) => client.search({ org: org.slug, limit: 50 }).catch(() => null)),
-    );
-    const listings = pages
-      .filter((page): page is NonNullable<typeof page> => page !== null)
-      .flatMap((page) => page.items)
-      .filter((job: Job) => slugs.has(job.org.slug));
-    invalidate({ ...state, listings, listingIndex: 0 });
+    const result = await busy('loading listings', () => client.myJobs());
+    if (result === null) return;
+    invalidate({ ...state, listings: result.items, listingIndex: 0 });
   };
 
   const loadInbox = async (): Promise<void> => {
@@ -298,7 +290,14 @@ export async function startTui(client: BoardClient): Promise<void> {
       return;
     }
     if (key === '/') {
-      invalidate({ ...state, editing: true, tab: 'find', detail: null, applications: null, query: '' });
+      invalidate({
+        ...state,
+        editing: true,
+        tab: 'find',
+        detail: null,
+        applications: null,
+        query: '',
+      });
       return;
     }
     if (key === 'tab') {
