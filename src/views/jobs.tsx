@@ -741,7 +741,7 @@ const ApplyForm: FC<{
               ? 'This employer asks you to say so. Saying so is not held against you; not saying so is.'
               : 'This employer is fine either way. Answer if you like.'}
           </p>
-          <Field label="Which agent" name="agent.name">
+          <Field label="Which agent" name="agent.name" error={errorFor('agent')}>
             <input
               class="input"
               type="text"

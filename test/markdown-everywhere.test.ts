@@ -208,6 +208,30 @@ test('an employer profile is prose on its page and beside a listing, and text in
   assert.ok(!list.includes('<script>'));
 });
 
+test('the application form shows the missing agent disclosure error beside its field', () => {
+  const html = String(
+    JobDetail({
+      job: { ...job, agentPolicy: 'disclose' },
+      html: '',
+      publicUrl: 'https://x.test',
+      problems: [
+        {
+          field: 'agent',
+          message: 'This employer asks applications written with an agent to say so.',
+        },
+      ],
+      values: {},
+      signedIn: false,
+      resumes: [],
+    } as never),
+  );
+
+  assert.match(
+    html,
+    /<div class="field field-error"><label class="label" for="agent\.name">Which agent<\/label>[\s\S]*?<span class="error-text">This employer asks applications written with an agent to say so\.<\/span>/,
+  );
+});
+
 test('a cover letter renders Markdown; a one-line answer stays a line', () => {
   const application = {
     id: 'a1',
