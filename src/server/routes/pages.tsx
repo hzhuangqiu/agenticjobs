@@ -65,7 +65,7 @@ import { parseQuery } from '../../schema/query.ts';
 import { jobPostingJsonLd } from '../../schema/jsonld.ts';
 import { toPlainText } from '../../markup/markdown.ts';
 import { renderMarkdown } from '../../markup/markdown.ts';
-import { parseResume, resumeTemplate } from '../../markup/resume.ts';
+import { parseResume, resumeBodyMarkdown, resumeTemplate } from '../../markup/resume.ts';
 import { openProfileFromResume } from '../../markup/openprofile.ts';
 import { Layout, type PageProps } from '../../views/layout.tsx';
 import { EmployerDetail, EmployerList, JobDetail, JobList } from '../../views/jobs.tsx';
@@ -485,7 +485,7 @@ export function pageRoutes(): Hono<AppEnv> {
         <CandidateDetail
           candidate={summary}
           parsed={shown.parsed}
-          html={renderMarkdown(shown.markdown, { headingOffset: 1 })}
+          html={renderMarkdown(resumeBodyMarkdown(shown.markdown), { headingOffset: 1 })}
           markdownUrl={`${config.publicUrl}/api/v1/candidates/${summary.slug}`}
           listed={resume.visibility === 'public'}
           contactRedacted={shown.redacted}

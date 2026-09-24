@@ -2574,7 +2574,15 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       assert.equal(found?.name, 'Ada Public');
       assert.ok(found?.skills.includes('TypeScript'), JSON.stringify(found?.skills));
 
-      assert.equal((await get(`/candidates/${slug}`, { accept: 'text/html' })).status, 200);
+      const page = await get(`/candidates/${slug}`, { accept: 'text/html' });
+      assert.equal(page.status, 200);
+      const pageHtml = await page.text();
+      assert.doesNotMatch(
+        pageHtml,
+        /<h2>Ada Public<\/h2>/,
+        'the resume name should not repeat below the candidate page heading',
+      );
+      assert.match(pageHtml, /<h3>Skills<\/h3>/, 'the resume sections stay on the page');
       const detail = (await (await get(`/api/v1/candidates/${slug}`)).json()) as {
         markdown: string;
         listed: boolean;
