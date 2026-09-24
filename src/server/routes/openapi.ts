@@ -316,9 +316,11 @@ export function openApiDocument(config: Config): Record<string, unknown> {
         post: {
           tags: ['apply'],
           summary: 'Send a draft application.',
+          description:
+            'The draft is sent only while its listing is published and unexpired. If the listing has closed or expired, the draft stays saved and the response is 409.',
           security: [{ bearer: [] }],
           parameters: [pathParam('id')],
-          responses: { 200: ok('Sent.'), 401: err(), 404: err() },
+          responses: { 200: ok('Sent.'), 401: err(), 404: err(), 409: err() },
         },
       },
       '/api/v1/orgs': {

@@ -706,7 +706,15 @@ export function apiRoutes(): Hono<AppEnv> {
     const viewer = viewerOf(c);
     if (viewer === null) return fail(c, 401, 'unauthenticated', 'Sign in first.');
     const sent = await submitApplication(pool, c.req.param('id'), viewer.id);
-    if (!sent) {
+    if (sent === 'job_not_open') {
+      return fail(
+        c,
+        409,
+        'job_not_open',
+        'This listing is no longer accepting applications. Your draft is still saved.',
+      );
+    }
+    if (sent === 'not_found') {
       return fail(
         c,
         404,

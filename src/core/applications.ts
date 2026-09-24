@@ -224,17 +224,36 @@ export async function submitApplication(
   pool: pg.Pool,
   id: string,
   userId: string,
-): Promise<boolean> {
+): Promise<'submitted' | 'job_not_open' | 'not_found'> {
   // Same guard as decideApplication: the id arrives from a URL, and a string
   // that is not a uuid makes Postgres raise rather than match nothing.
-  if (!UUID.test(id)) return false;
-  const result = await pool.query(
-    `update applications
-        set status = 'new', submitted_at = now()
-      where id = $1 and user_id = $2 and submitted_at is null`,
+  if (!UUID.test(id)) return 'not_found';
+  const result = await pool.query<{ outcome: 'submitted' | 'job_not_open' | 'not_found' }>(
+    `with draft as (
+       select a.id,
+              exists (
+                select 1 from jobs j
+                 where j.id = a.job_id and j.status = 'published'
+                   and j.published_at is not null and j.published_at <= now()
+                   and (j.expires_at is null or j.expires_at > now())
+              ) as accepting
+         from applications a
+        where a.id = $1 and a.user_id = $2 and a.submitted_at is null
+     ), submitted as (
+        update applications a
+          set status = 'new', submitted_at = now()
+         from draft d
+        where a.id = d.id and a.submitted_at is null and d.accepting
+        returning a.id
+     )
+     select case
+              when exists (select 1 from submitted) then 'submitted'
+              when exists (select 1 from draft where not accepting) then 'job_not_open'
+              else 'not_found'
+            end as outcome`,
     [id, userId],
   );
-  return (result.rowCount ?? 0) > 0;
+  return result.rows[0]?.outcome ?? 'not_found';
 }
 
 export async function listDraftApplications(

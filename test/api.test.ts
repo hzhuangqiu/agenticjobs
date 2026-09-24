@@ -1213,6 +1213,72 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       assert.doesNotMatch(submitted, /Sent 2 days ago|Not sent to the employer/);
     });
 
+    test('a prepared application stays a draft after its listing closes', async () => {
+      if (pool === null) return;
+      const { createSession, ensureUser } = await import('../dist/core/auth.js');
+      const { createOrg } = await import('../dist/core/orgs.js');
+      const stamp = `${Date.now()}${Math.random().toString(36).slice(2, 7)}`;
+      const employer = await ensureUser(pool as never, `closed+${stamp}@example.com`, 'Employer');
+      const employerToken = await createSession(pool as never, employer.id, { label: 'web' });
+      const org = await createOrg(pool as never, employer.id, { name: `Closed ${stamp}` });
+      if (typeof org === 'string') throw new Error(org);
+      const employerAuth = { authorization: `Bearer ${employerToken}` };
+      const candidate = await ensureUser(
+        pool as never,
+        `candidate+${stamp}@example.com`,
+        'Candidate',
+      );
+      const candidateToken = await createSession(pool as never, candidate.id, { label: 'web' });
+      const candidateAuth = { authorization: `Bearer ${candidateToken}` };
+
+      const created = (await (
+        await post(
+          '/api/v1/jobs',
+          {
+            org: org.slug,
+            title: `Closing ${stamp}`,
+            description: 'A listing that takes applications on the board.',
+            agentPolicy: 'welcome',
+            pay: ['$100 an hour'],
+          },
+          employerAuth,
+        )
+      ).json()) as { job: { slug: string } };
+      const slug = created.job.slug;
+      await post(`/api/v1/jobs/${slug}/publish`, {}, employerAuth);
+      const prepared = (await (
+        await post(
+          `/api/v1/jobs/${slug}/apply`,
+          {
+            name: 'Candidate',
+            email: `candidate+${stamp}@example.com`,
+            cover: 'Please consider me.',
+            submit: false,
+          },
+          candidateAuth,
+        )
+      ).json()) as { applicationId: string };
+
+      await post(`/api/v1/jobs/${slug}/close`, {}, employerAuth);
+      const submitted = await post(
+        `/api/v1/applications/${prepared.applicationId}/submit`,
+        {},
+        candidateAuth,
+      );
+      assert.equal(submitted.status, 409, await submitted.text());
+
+      const drafts = (await (await get('/api/v1/applications/drafts', candidateAuth)).json()) as {
+        items: { id: string }[];
+      };
+      assert.ok(drafts.items.some((item) => item.id === prepared.applicationId));
+      const inbox = (await (
+        await get(`/api/v1/jobs/${slug}/applications`, employerAuth)
+      ).json()) as {
+        items: { id: string }[];
+      };
+      assert.ok(!inbox.items.some((item) => item.id === prepared.applicationId));
+    });
+
     test('a draft nobody sent cannot be decided on', async () => {
       // An employer cannot see a draft, so an employer cannot reject one out
       // from under the candidate who has not released it yet.

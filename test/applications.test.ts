@@ -44,8 +44,26 @@ test('submitting a draft with a malformed id is a miss, not a database error', a
     'not-a-uuid',
     '00000000-0000-4000-8000-000000000000',
   );
-  assert.equal(sent, false);
+  assert.equal(sent, 'not_found');
   assert.equal(reached, false, 'a malformed id never reaches the database');
+});
+
+test('submitting a draft reports when its job has stopped accepting applications', async () => {
+  let sql = '';
+  const pool = {
+    query: async (statement: string) => {
+      sql = statement;
+      return { rows: [{ outcome: 'job_not_open' }], rowCount: 0 };
+    },
+  };
+  const sent = await submitApplication(
+    pool as never,
+    '00000000-0000-4000-8000-000000000001',
+    '00000000-0000-4000-8000-000000000002',
+  );
+  assert.equal(sent, 'job_not_open');
+  assert.match(sql, /j\.status = 'published'/);
+  assert.match(sql, /j\.expires_at is null or j\.expires_at > now\(\)/);
 });
 
 test('an application field named __proto__ keeps its submitted answer', () => {
