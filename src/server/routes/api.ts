@@ -578,6 +578,8 @@ export function apiRoutes(): Hono<AppEnv> {
         requirements: body['requirements'] ?? job.requirements,
         responsibilities: body['responsibilities'] ?? job.responsibilities,
         agentPolicy: body['agentPolicy'] ?? job.agentPolicy,
+        applySchema: Object.hasOwn(body, 'applySchema') ? body['applySchema'] : job.apply.schema,
+        expiresAt: Object.hasOwn(body, 'expiresAt') ? body['expiresAt'] : job.expiresAt,
         ...payPatch(body, job),
       },
       job.org.id,

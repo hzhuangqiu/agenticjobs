@@ -2947,6 +2947,57 @@ describe('the API', { skip: reason === '' ? false : `no database: ${reason}` }, 
       assert.equal(edited.job.title, created.job.title);
     });
 
+    test('an edit that omits the application schema and expiry preserves both', async () => {
+      if (pool === null) return;
+      const { createSession } = await import('../dist/core/auth.js');
+      const owner = await pool.query(`select user_id from memberships limit 1`);
+      const token = await createSession(pool as never, owner.rows[0]?.['user_id'], { label: 't' });
+      const auth = { authorization: `Bearer ${token}` };
+      const expiresAt = '2099-01-01T00:00:00.000Z';
+
+      const created = (await (
+        await post(
+          '/api/v1/jobs',
+          {
+            org: 'example-works',
+            title: `Preserve settings ${Date.now()}`,
+            description: 'A listing with a custom question and an expiry date.',
+            agentPolicy: 'welcome',
+            expiresAt,
+            applySchema: {
+              fields: [
+                {
+                  name: 'portfolio',
+                  label: 'Portfolio link',
+                  type: 'url',
+                  required: true,
+                  maxLength: 500,
+                },
+              ],
+            },
+          },
+          auth,
+        )
+      ).json()) as { job: { slug: string } };
+
+      const edited = (await (
+        await patch(
+          `/api/v1/jobs/${created.job.slug}`,
+          { description: 'A corrected description.' },
+          auth,
+        )
+      ).json()) as {
+        job: {
+          expiresAt: string | null;
+          apply: { schema: { fields: { name: string; label: string }[] } };
+        };
+      };
+      assert.equal(edited.job.expiresAt, expiresAt);
+      assert.deepEqual(edited.job.apply.schema.fields, [
+        { name: 'portfolio', label: 'Portfolio link', type: 'url', required: true, maxLength: 500 },
+      ]);
+    });
+
     test("editing someone else's listing is refused", async () => {
       if (pool === null) return;
       const { createSession, ensureUser } = await import('../dist/core/auth.js');
