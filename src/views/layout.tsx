@@ -39,6 +39,48 @@ export interface PageProps {
   skills?: SkillCount[];
 }
 
+/**
+ * The mark from web/public/icon.svg, inlined so the header costs no request.
+ * A briefcase in orbit with an agent on the ring: the same orbit family as
+ * w3bs.org's mark, in this board's green. Keep the two in step.
+ */
+const BrandMark: FC = () => (
+  <svg class="brand-mark" viewBox="0 0 64 64" aria-hidden="true">
+    <rect width="64" height="64" rx="16" fill="#1f5c45" />
+    <ellipse
+      cx="32"
+      cy="34"
+      rx="26"
+      ry="10"
+      transform="rotate(-24 32 34)"
+      fill="none"
+      stroke="#f6f4ed"
+      stroke-width="2.6"
+      opacity=".55"
+    />
+    <path
+      d="M26.5 24v-3a2.5 2.5 0 0 1 2.5-2.5h6a2.5 2.5 0 0 1 2.5 2.5v3"
+      fill="none"
+      stroke="#f6f4ed"
+      stroke-width="3"
+      stroke-linecap="round"
+    />
+    <rect
+      x="18"
+      y="23"
+      width="28"
+      height="21"
+      rx="5"
+      fill="#f6f4ed"
+      stroke="#1f5c45"
+      stroke-width="2.5"
+    />
+    <path d="M19.5 32.5h25" stroke="#1f5c45" stroke-width="2" />
+    <rect x="29.5" y="30" width="5" height="5" rx="1.5" fill="#1f5c45" />
+    <circle cx="50.54" cy="20.27" r="4.2" fill="#e0643c" stroke="#1f5c45" stroke-width="1.6" />
+  </svg>
+);
+
 export const Layout: FC<PropsWithChildren<PageProps>> = (props) => {
   const {
     title,
@@ -79,11 +121,14 @@ export const Layout: FC<PropsWithChildren<PageProps>> = (props) => {
         <meta name="twitter:card" content="summary" />
         {/* The theme meta is duplicated per scheme so the browser chrome
             matches whichever palette the page actually painted. */}
-        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
-        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#111318" />
+        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f6f4ed" />
+        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#141b18" />
         <link rel="stylesheet" href="/assets/app.css" />
         <link rel="manifest" href="/manifest.webmanifest" />
-        <link rel="icon" href="/assets/icon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml" />
+        <link rel="icon" href="/assets/favicon-32.png" type="image/png" sizes="32x32" />
+        <link rel="icon" href="/assets/favicon-16.png" type="image/png" sizes="16x16" />
+        <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png" sizes="180x180" />
         <link
           rel="alternate"
           type="application/json"
@@ -126,10 +171,11 @@ export const Layout: FC<PropsWithChildren<PageProps>> = (props) => {
         <header class="site-header">
           <div class="container">
             <a class="brand" href="/">
-              <span class="brand-mark" aria-hidden="true">
-                aj
+              <BrandMark />
+              <span class="brand-name">
+                {boardName}
+                <span class="brand-dot">.</span>
               </span>
-              {boardName}
             </a>
             <nav class="nav" aria-label="Main">
               <a href="/" aria-current={path === '/' ? 'page' : undefined}>

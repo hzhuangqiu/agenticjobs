@@ -45,6 +45,7 @@ const MIME: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
+  '.ico': 'image/x-icon',
   '.webmanifest': 'application/manifest+json',
   '.txt': 'text/plain; charset=utf-8',
   '.json': 'application/json',
@@ -183,6 +184,25 @@ export function discoveryRoutes(): Hono<AppEnv> {
       return c.notFound();
     }
   });
+
+  // Browsers and iOS ask the root for these whatever the page declares, so a
+  // missing one is a 404 in every access log and a blank tile on a home screen.
+  for (const [path, file] of [
+    ['/favicon.ico', 'favicon.ico'],
+    ['/apple-touch-icon.png', 'apple-touch-icon.png'],
+    ['/apple-touch-icon-precomposed.png', 'apple-touch-icon.png'],
+  ] as const) {
+    routes.get(path, async (c) => {
+      try {
+        return c.body(await readFile(join(publicDir(), file)), 200, {
+          'content-type': MIME[extname(file)]!,
+          'cache-control': 'public, max-age=86400',
+        });
+      } catch {
+        return c.notFound();
+      }
+    });
+  }
 
   /**
    * The installer, at the root so the curl line is short enough to read aloud.
@@ -881,12 +901,13 @@ export function discoveryRoutes(): Hono<AppEnv> {
         start_url: '/',
         scope: '/',
         display: 'standalone',
-        background_color: '#ffffff',
-        theme_color: '#111318',
+        background_color: '#f6f4ed',
+        theme_color: '#1f5c45',
         icons: [
           { src: '/assets/icon.svg', sizes: 'any', type: 'image/svg+xml', purpose: 'any' },
           { src: '/assets/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/assets/icon-512.png', sizes: '512x512', type: 'image/png' },
+          { src: '/assets/apple-touch-icon.png', sizes: '180x180', type: 'image/png' },
         ],
         shortcuts: [
           { name: 'Post a job', url: '/post' },
