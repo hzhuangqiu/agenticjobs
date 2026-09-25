@@ -83,25 +83,28 @@ a:hover {
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  font-weight: 650;
-  letter-spacing: -0.01em;
+  gap: 0.55rem;
   color: var(--foreground);
   text-decoration: none;
   margin-right: auto;
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: calc(var(--radius) - 2px);
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: 0.8rem;
-  font-weight: 700;
+  width: 2rem;
+  height: 2rem;
   flex: none;
+}
+
+/* The w3bs.org wordmark: heavy, tracked in, and a coloured full stop. */
+.brand-name {
+  font-weight: 800;
+  font-size: 1.3rem;
+  letter-spacing: -0.05em;
+  line-height: 1;
+}
+
+.brand-dot {
+  color: var(--orange);
 }
 
 .nav {
@@ -263,11 +266,24 @@ h4 {
   font-weight: 650;
 }
 
+/* Headlines are set like w3bs.org's: a light serif, tight, with an orange
+   italic for the one word that carries the line. */
+h1,
+h2 {
+  font-family: var(--font-serif);
+  font-weight: 400;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
 h1 {
-  font-size: clamp(1.6rem, 1.2rem + 1.6vw, 2.25rem);
+  font-size: clamp(2rem, 1.4rem + 2.4vw, 3.1rem);
 }
 h2 {
-  font-size: 1.35rem;
+  font-size: 1.6rem;
+}
+h1 em,
+h2 em {
+  color: var(--orange);
 }
 h3 {
   font-size: 1.1rem;
@@ -310,8 +326,9 @@ h3 {
 }
 
 .card-title {
-  font-size: 1.05rem;
-  font-weight: 650;
+  font-size: 1.35rem;
+  font-weight: 400;
+  letter-spacing: -0.02em;
   margin: 0;
 }
 
