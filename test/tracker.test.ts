@@ -320,7 +320,8 @@ describe('tracker API and CLI against Postgres', { skip: !database }, () => {
     assert.match(page.headers.get('cache-control') ?? '', /no-store/);
     const html = await page.text();
     assert.match(html, /Tracked billable agent-hours/);
-    assert.match(html, /Unknown/);
+    assert.match(html, /How to improve/);
+    assert.doesNotMatch(html, />Unknown</);
     assert.doesNotMatch(html, /crawlproof.com\/stats/);
     assert.equal((await request('/tracker', '')).status, 302);
     assert.equal((await request('/tracker/docs', '')).status, 200);
